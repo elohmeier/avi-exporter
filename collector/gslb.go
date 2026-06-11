@@ -38,9 +38,4 @@ func (e *Exporter) collectGslbServices(ctx context.Context, tenant string, items
 			e.emitInfo(e.gslbServiceDomainsInfo, labels, "fqdn", fqdn)
 		}
 	}
-	e.gslbServiceOperUp.Collect(ch)
-	e.gslbServiceOperStatusInfo.Collect(ch)
-	e.gslbServiceEnabled.Collect(ch)
-	e.gslbServiceMemberCount.Collect(ch)
-	e.gslbServiceDomainsInfo.Collect(ch)
 }

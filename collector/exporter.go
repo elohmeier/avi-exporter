@@ -1,7 +1,9 @@
 package collector
 
 import (
+	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -13,6 +15,7 @@ const namespace = "avi"
 
 // Exporter implements prometheus.Collector for an Avi controller.
 type Exporter struct {
+	collectMu   sync.Mutex
 	cfg         *config.Config
 	url         string
 	parallelism int
@@ -22,10 +25,10 @@ type Exporter struct {
 	client      *avi.Client
 
 	// --- Self-metrics ---
-	up                 *prometheus.GaugeVec
-	scrapeDuration     *prometheus.GaugeVec
-	scrapeErrorsTotal  *prometheus.CounterVec
-	scrapeTotal        *prometheus.CounterVec
+	up                *prometheus.GaugeVec
+	scrapeDuration    *prometheus.GaugeVec
+	scrapeErrorsTotal *prometheus.CounterVec
+	scrapeTotal       *prometheus.CounterVec
 
 	// --- Cluster (admin tenant) ---
 	clusterUp        *prometheus.Desc
@@ -35,20 +38,20 @@ type Exporter struct {
 	clusterNodeRole  *prometheus.GaugeVec
 
 	// --- Virtual Service inventory ---
-	vsOperUp           *prometheus.GaugeVec
-	vsOperStatusInfo   *prometheus.GaugeVec
-	vsEnabled          *prometheus.GaugeVec
-	vsHealthScore      *prometheus.GaugeVec
-	vsPercentSesUp     *prometheus.GaugeVec
-	vsTypeInfo         *prometheus.GaugeVec
-	vsAlertLevel       *prometheus.GaugeVec
+	vsOperUp         *prometheus.GaugeVec
+	vsOperStatusInfo *prometheus.GaugeVec
+	vsEnabled        *prometheus.GaugeVec
+	vsHealthScore    *prometheus.GaugeVec
+	vsPercentSesUp   *prometheus.GaugeVec
+	vsTypeInfo       *prometheus.GaugeVec
+	vsAlertLevel     *prometheus.GaugeVec
 
 	// VS vip_summary[] — per-VIP runtime from VS inventory (separate from /vsvip-inventory)
-	vsVipOperUp          *prometheus.GaugeVec
-	vsVipPercentSesUp    *prometheus.GaugeVec
-	vsVipNumSeAssigned   *prometheus.GaugeVec
-	vsVipNumSeRequested  *prometheus.GaugeVec
-	vsVipOperStatusInfo  *prometheus.GaugeVec
+	vsVipOperUp         *prometheus.GaugeVec
+	vsVipPercentSesUp   *prometheus.GaugeVec
+	vsVipNumSeAssigned  *prometheus.GaugeVec
+	vsVipNumSeRequested *prometheus.GaugeVec
+	vsVipOperStatusInfo *prometheus.GaugeVec
 
 	// --- VS analytics ---
 	vsAvgBandwidth       *prometheus.GaugeVec
@@ -105,49 +108,49 @@ type Exporter struct {
 	gslbServiceDomainsInfo    *prometheus.GaugeVec
 
 	// --- Service Engine inventory ---
-	seOperUp            *prometheus.GaugeVec
-	seOperStatusInfo    *prometheus.GaugeVec
-	seEnabled           *prometheus.GaugeVec
-	seHealthScore       *prometheus.GaugeVec
-	seConnected         *prometheus.GaugeVec
-	seBgpPeersUp        *prometheus.GaugeVec
-	seGatewayUp         *prometheus.GaugeVec
-	seAtCurrVer         *prometheus.GaugeVec
-	seSufficientMem     *prometheus.GaugeVec
-	seLicensedCores     *prometheus.GaugeVec
-	seLicenseState      *prometheus.GaugeVec
-	sePowerState        *prometheus.GaugeVec
-	seMigrateState      *prometheus.GaugeVec
-	seVersionInfo       *prometheus.GaugeVec
-	seEnableStateInfo   *prometheus.GaugeVec
+	seOperUp          *prometheus.GaugeVec
+	seOperStatusInfo  *prometheus.GaugeVec
+	seEnabled         *prometheus.GaugeVec
+	seHealthScore     *prometheus.GaugeVec
+	seConnected       *prometheus.GaugeVec
+	seBgpPeersUp      *prometheus.GaugeVec
+	seGatewayUp       *prometheus.GaugeVec
+	seAtCurrVer       *prometheus.GaugeVec
+	seSufficientMem   *prometheus.GaugeVec
+	seLicensedCores   *prometheus.GaugeVec
+	seLicenseState    *prometheus.GaugeVec
+	sePowerState      *prometheus.GaugeVec
+	seMigrateState    *prometheus.GaugeVec
+	seVersionInfo     *prometheus.GaugeVec
+	seEnableStateInfo *prometheus.GaugeVec
 
 	// --- SE analytics ---
-	seAvgCPUUsage    *prometheus.GaugeVec
-	seAvgMemUsage    *prometheus.GaugeVec
-	seAvgDiskUsage   *prometheus.GaugeVec
-	seAvgConnections *prometheus.GaugeVec
-	seAvgConnDropped *prometheus.GaugeVec
-	seAvgRxBytes     *prometheus.GaugeVec
-	seAvgTxBytes     *prometheus.GaugeVec
-	seAvgBandwidth   *prometheus.GaugeVec
-	seAvgConnMem     *prometheus.GaugeVec
-	sePctConnDropped *prometheus.GaugeVec
-	sePktBufUsage    *prometheus.GaugeVec
+	seAvgCPUUsage     *prometheus.GaugeVec
+	seAvgMemUsage     *prometheus.GaugeVec
+	seAvgDiskUsage    *prometheus.GaugeVec
+	seAvgConnections  *prometheus.GaugeVec
+	seAvgConnDropped  *prometheus.GaugeVec
+	seAvgRxBytes      *prometheus.GaugeVec
+	seAvgTxBytes      *prometheus.GaugeVec
+	seAvgBandwidth    *prometheus.GaugeVec
+	seAvgConnMem      *prometheus.GaugeVec
+	sePctConnDropped  *prometheus.GaugeVec
+	sePktBufUsage     *prometheus.GaugeVec
 	sePersistTblUsage *prometheus.GaugeVec
-	seSslSessCache   *prometheus.GaugeVec
+	seSslSessCache    *prometheus.GaugeVec
 
 	// --- VIP / VsVip inventory ---
-	vipOperUp           *prometheus.GaugeVec
-	vipOperStatusInfo   *prometheus.GaugeVec
-	vipEnabled          *prometheus.GaugeVec
-	vipPercentSesUp     *prometheus.GaugeVec
-	vipNumSeAssigned    *prometheus.GaugeVec
-	vipNumSeRequested   *prometheus.GaugeVec
-	vipActiveOnSe       *prometheus.GaugeVec
-	vipSharedByVsCount  *prometheus.GaugeVec
-	vipFloatingIP       *prometheus.GaugeVec
-	vipAutoAllocated    *prometheus.GaugeVec
-	vipDNSRecord        *prometheus.GaugeVec
+	vipOperUp          *prometheus.GaugeVec
+	vipOperStatusInfo  *prometheus.GaugeVec
+	vipEnabled         *prometheus.GaugeVec
+	vipPercentSesUp    *prometheus.GaugeVec
+	vipNumSeAssigned   *prometheus.GaugeVec
+	vipNumSeRequested  *prometheus.GaugeVec
+	vipActiveOnSe      *prometheus.GaugeVec
+	vipSharedByVsCount *prometheus.GaugeVec
+	vipFloatingIP      *prometheus.GaugeVec
+	vipAutoAllocated   *prometheus.GaugeVec
+	vipDNSRecord       *prometheus.GaugeVec
 
 	// --- Topology (Grafana node-graph style) ---
 	topologyNode              *prometheus.GaugeVec
@@ -160,6 +163,10 @@ type Exporter struct {
 
 // NewExporter wires descriptors and constructs the underlying AVI client.
 func NewExporter(cfg *config.Config, url, username, password string, ignoreCert bool, caFile string, parallelism int, logger *slog.Logger) (*Exporter, error) {
+	if parallelism < 1 {
+		return nil, fmt.Errorf("parallelism must be at least 1")
+	}
+
 	client, err := avi.NewClient(url, username, password, cfg.APIVersion, ignoreCert, caFile, logger)
 	if err != nil {
 		return nil, err
@@ -448,4 +455,3 @@ func boolToFloat(b *bool) float64 {
 	}
 	return 0
 }
-

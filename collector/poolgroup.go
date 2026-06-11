@@ -52,7 +52,4 @@ func (e *Exporter) collectPoolGroupInventory(ctx context.Context, tenant string,
 			}
 		}
 	}
-	e.poolGroupInfo.Collect(ch)
-	e.poolGroupMemberCount.Collect(ch)
 }
-

@@ -63,10 +63,10 @@ type ClusterRuntime struct {
 
 // OperStatus is a common runtime sub-object on inventory entries.
 type OperStatus struct {
-	State            string `json:"state"` // OPER_UP / OPER_DOWN / OPER_PARTITIONED / OPER_DISABLED / OPER_FAILED / ...
-	LastChangedTime  string `json:"last_changed_time,omitempty"`
-	ReasonCode       int    `json:"reason_code,omitempty"`
-	ReasonCodeString string `json:"reason_code_string,omitempty"`
+	State            string          `json:"state"` // OPER_UP / OPER_DOWN / OPER_PARTITIONED / OPER_DISABLED / OPER_FAILED / ...
+	LastChangedTime  json.RawMessage `json:"last_changed_time,omitempty"`
+	ReasonCode       int             `json:"reason_code,omitempty"`
+	ReasonCodeString string          `json:"reason_code_string,omitempty"`
 }
 
 // HealthScore is the analytics sub-object on inventory entries.
@@ -220,18 +220,18 @@ type SEConfig struct {
 }
 
 type SERuntime struct {
-	OperStatus      OperStatus `json:"oper_status"`
-	SeConnected     *bool      `json:"se_connected,omitempty"`
-	BgpPeersUp      *bool      `json:"bgp_peers_up,omitempty"`
-	GatewayUp       *bool      `json:"gateway_up,omitempty"`
-	LicenseState    string     `json:"license_state,omitempty"`
-	PowerState      string     `json:"power_state,omitempty"`
-	MigrateState    string     `json:"migrate_state,omitempty"`
-	Version         string     `json:"version,omitempty"`
-	AtCurrVer       *bool      `json:"at_curr_ver,omitempty"`
-	SufficientMem   *bool      `json:"sufficient_memory,omitempty"`
-	OnlineSince     string     `json:"online_since,omitempty"`
-	LicensedCores   float64    `json:"licensed_service_cores,omitempty"`
+	OperStatus    OperStatus `json:"oper_status"`
+	SeConnected   *bool      `json:"se_connected,omitempty"`
+	BgpPeersUp    *bool      `json:"bgp_peers_up,omitempty"`
+	GatewayUp     *bool      `json:"gateway_up,omitempty"`
+	LicenseState  string     `json:"license_state,omitempty"`
+	PowerState    string     `json:"power_state,omitempty"`
+	MigrateState  string     `json:"migrate_state,omitempty"`
+	Version       string     `json:"version,omitempty"`
+	AtCurrVer     *bool      `json:"at_curr_ver,omitempty"`
+	SufficientMem *bool      `json:"sufficient_memory,omitempty"`
+	OnlineSince   string     `json:"online_since,omitempty"`
+	LicensedCores float64    `json:"licensed_service_cores,omitempty"`
 }
 
 type SEInventoryItem struct {
@@ -269,6 +269,22 @@ type DNSInfo struct {
 // VsRef is a back-reference to a VirtualService.
 type VsRef struct {
 	UUID string `json:"uuid"`
+	Ref  string `json:"ref,omitempty"`
+}
+
+// UnmarshalJSON accepts both compact {uuid} references and documented {ref}
+// references, including include_name refs suffixed with "#<name>".
+func (v *VsRef) UnmarshalJSON(b []byte) error {
+	type raw VsRef
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	if r.UUID == "" {
+		r.UUID = RefUUID(r.Ref)
+	}
+	*v = VsRef(r)
+	return nil
 }
 
 // VsVipConfig is the config block from /api/vsvip-inventory.
@@ -292,12 +308,30 @@ type VsVipConfig struct {
 type VipSeAssigned struct {
 	Name          string `json:"name,omitempty"`
 	URL           string `json:"url,omitempty"`
+	Ref           string `json:"ref,omitempty"`
 	UUID          string `json:"uuid,omitempty"`
 	Primary       *bool  `json:"primary,omitempty"`
 	Standby       *bool  `json:"standby,omitempty"`
 	Connected     *bool  `json:"connected,omitempty"`
 	ActiveOnSe    *bool  `json:"active_on_se,omitempty"`
 	ActiveOnCloud *bool  `json:"active_on_cloud,omitempty"`
+}
+
+// UnmarshalJSON accepts both older url/uuid forms and documented ref forms.
+func (v *VipSeAssigned) UnmarshalJSON(b []byte) error {
+	type raw VipSeAssigned
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	if r.URL == "" {
+		r.URL = r.Ref
+	}
+	if r.UUID == "" {
+		r.UUID = RefUUID(r.URL)
+	}
+	*v = VipSeAssigned(r)
+	return nil
 }
 
 // VsVipRuntime is the per-VIP runtime entry.
@@ -357,15 +391,15 @@ type PoolGroupMember struct {
 }
 
 type PoolGroupConfig struct {
-	UUID      string            `json:"uuid"`
-	Name      string            `json:"name"`
-	URL       string            `json:"url,omitempty"`
-	CloudRef  string            `json:"cloud_ref,omitempty"`
-	TenantRef string            `json:"tenant_ref,omitempty"`
-	CreatedBy string            `json:"created_by,omitempty"`
-	Markers   []Marker          `json:"markers,omitempty"`
-	Members   []PoolGroupMember `json:"members,omitempty"`
-	MinServers int              `json:"min_servers,omitempty"`
+	UUID       string            `json:"uuid"`
+	Name       string            `json:"name"`
+	URL        string            `json:"url,omitempty"`
+	CloudRef   string            `json:"cloud_ref,omitempty"`
+	TenantRef  string            `json:"tenant_ref,omitempty"`
+	CreatedBy  string            `json:"created_by,omitempty"`
+	Markers    []Marker          `json:"markers,omitempty"`
+	Members    []PoolGroupMember `json:"members,omitempty"`
+	MinServers int               `json:"min_servers,omitempty"`
 }
 
 // PoolGroupInventoryItem mirrors /api/poolgroup-inventory. There's no
@@ -384,18 +418,18 @@ type GslbPool struct {
 }
 
 type GslbServiceConfig struct {
-	UUID         string     `json:"uuid"`
-	Name         string     `json:"name"`
-	URL          string     `json:"url,omitempty"`
-	Enabled      *bool      `json:"enabled,omitempty"`
-	IsFederated  *bool      `json:"is_federated,omitempty"`
-	PoolAlgorithm string    `json:"pool_algorithm,omitempty"`
-	MinMembers   int        `json:"min_members,omitempty"`
-	DomainNames  []string   `json:"domain_names,omitempty"`
-	Groups       []GslbPool `json:"groups,omitempty"`
-	TenantRef    string     `json:"tenant_ref,omitempty"`
-	CreatedBy    string     `json:"created_by,omitempty"`
-	Markers      []Marker   `json:"markers,omitempty"`
+	UUID          string     `json:"uuid"`
+	Name          string     `json:"name"`
+	URL           string     `json:"url,omitempty"`
+	Enabled       *bool      `json:"enabled,omitempty"`
+	IsFederated   *bool      `json:"is_federated,omitempty"`
+	PoolAlgorithm string     `json:"pool_algorithm,omitempty"`
+	MinMembers    int        `json:"min_members,omitempty"`
+	DomainNames   []string   `json:"domain_names,omitempty"`
+	Groups        []GslbPool `json:"groups,omitempty"`
+	TenantRef     string     `json:"tenant_ref,omitempty"`
+	CreatedBy     string     `json:"created_by,omitempty"`
+	Markers       []Marker   `json:"markers,omitempty"`
 }
 
 type GslbServiceRuntime struct {

@@ -59,7 +59,10 @@ func RefUUID(ref string) string {
 		return ""
 	}
 	if i := strings.LastIndex(ref, "/"); i >= 0 {
-		return ref[i+1:]
+		ref = ref[i+1:]
+	}
+	if i := strings.Index(ref, "#"); i >= 0 {
+		return ref[:i]
 	}
 	return ref
 }

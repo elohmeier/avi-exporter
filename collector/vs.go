@@ -72,18 +72,6 @@ func (e *Exporter) collectVSInventory(ctx context.Context, tenant string, items 
 			e.vsVipNumSeRequested.WithLabelValues(vipLbl...).Set(float64(vrs.NumSeRequested))
 		}
 	}
-	e.vsOperUp.Collect(ch)
-	e.vsOperStatusInfo.Collect(ch)
-	e.vsEnabled.Collect(ch)
-	e.vsHealthScore.Collect(ch)
-	e.vsPercentSesUp.Collect(ch)
-	e.vsTypeInfo.Collect(ch)
-	e.vsAlertLevel.Collect(ch)
-	e.vsVipOperUp.Collect(ch)
-	e.vsVipOperStatusInfo.Collect(ch)
-	e.vsVipPercentSesUp.Collect(ch)
-	e.vsVipNumSeAssigned.Collect(ch)
-	e.vsVipNumSeRequested.Collect(ch)
 }
 
 // vsMetricIDs is the curated list pushed in the analytics POST per VS.
@@ -150,20 +138,6 @@ func (e *Exporter) collectVSAnalytics(ctx context.Context, tenant string, items 
 		}
 	}
 
-	e.vsAvgBandwidth.Collect(ch)
-	e.vsAvgCompleteConns.Collect(ch)
-	e.vsAvgNewEstabConns.Collect(ch)
-	e.vsMaxOpenConns.Collect(ch)
-	e.vsConnectionsDropped.Collect(ch)
-	e.vsAvgTotalRequests.Collect(ch)
-	e.vsAvgCompleteResp.Collect(ch)
-	e.vsAvgErrorResp.Collect(ch)
-	e.vsAvgResp2xx.Collect(ch)
-	e.vsAvgResp4xx.Collect(ch)
-	e.vsAvgResp5xx.Collect(ch)
-	e.vsApdexR.Collect(ch)
-	e.vsAvgClientRTT.Collect(ch)
-	e.vsAvgRespLatency.Collect(ch)
 	return nil
 }
 

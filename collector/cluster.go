@@ -22,7 +22,6 @@ func (e *Exporter) collectCluster(ctx context.Context, ch chan<- prometheus.Metr
 	ch <- prometheus.MustNewConstMetric(e.clusterProgress, prometheus.GaugeValue, float64(rt.ClusterState.Progress), base...)
 
 	e.emitInfo(e.clusterStateInfo, base, "state", rt.ClusterState.State)
-	e.clusterStateInfo.Collect(ch)
 
 	for _, n := range rt.NodeStates {
 		labels := e.appendLabels(n.Name)
@@ -38,7 +37,5 @@ func (e *Exporter) collectCluster(ctx context.Context, ch chan<- prometheus.Metr
 		}
 		e.clusterNodeRole.WithLabelValues(labels...).Set(leader)
 	}
-	e.clusterNodeUp.Collect(ch)
-	e.clusterNodeRole.Collect(ch)
 	return nil
 }

@@ -13,6 +13,9 @@ import (
 
 // Collect is invoked by the Prometheus HTTP handler on each scrape.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+	e.collectMu.Lock()
+	defer e.collectMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -24,7 +27,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 
 	// 1. Cluster — admin tenant only, no per-tenant fanout.
 	if !e.cfg.IsModuleDisabled("cluster") {
-		e.runModule(ch, "cluster", "", func() error {
+		e.runModule("cluster", "", func() error {
 			return e.collectCluster(ctx, ch)
 		})
 	}
@@ -32,7 +35,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	// 2. Service Engines — admin tenant.
 	var seItems []avi.SEInventoryItem
 	if !e.cfg.IsModuleDisabled("se_inventory") || !e.cfg.IsModuleDisabled("se_metrics") {
-		e.runModule(ch, "se_list", "", func() error {
+		e.runModule("se_list", "", func() error {
 			items, err := e.client.ListSEInventory(ctx)
 			if err != nil {
 				return err
@@ -42,13 +45,13 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 		})
 	}
 	if !e.cfg.IsModuleDisabled("se_inventory") && seItems != nil {
-		e.runModule(ch, "se_inventory", "", func() error {
+		e.runModule("se_inventory", "", func() error {
 			e.collectSEInventory(ctx, seItems, ch)
 			return nil
 		})
 	}
 	if !e.cfg.IsModuleDisabled("se_metrics") && seItems != nil {
-		e.runModule(ch, "se_metrics", "", func() error {
+		e.runModule("se_metrics", "", func() error {
 			return e.collectSEAnalytics(ctx, seItems, ch)
 		})
 	}
@@ -72,9 +75,9 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	}
 	wg.Wait()
 
-	// 4. Emit topology after all tenants have populated their nodes/edges.
-	if !e.cfg.IsModuleDisabled("topology") {
-		e.emitTopology(ch)
+	// 4. Emit every GaugeVec once after all modules have populated values.
+	for _, g := range e.allGaugeVecs() {
+		g.Collect(ch)
 	}
 
 	// 5. Self-metrics
@@ -90,7 +93,7 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 
 	var vsItems []avi.VSInventoryItem
 	if !e.cfg.IsModuleDisabled("vs_inventory") || !e.cfg.IsModuleDisabled("vs_metrics") || !e.cfg.IsModuleDisabled("topology") {
-		if err := e.runModule(ch, "vs_list", tenant, func() error {
+		if err := e.runModule("vs_list", tenant, func() error {
 			items, err := e.client.ListVSInventory(ctx, tenant)
 			if err != nil {
 				return err
@@ -102,13 +105,13 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 		}
 	}
 	if !e.cfg.IsModuleDisabled("vs_inventory") && vsItems != nil {
-		e.runModule(ch, "vs_inventory", tenant, func() error {
+		e.runModule("vs_inventory", tenant, func() error {
 			e.collectVSInventory(ctx, tenant, vsItems, ch)
 			return nil
 		})
 	}
 	if !e.cfg.IsModuleDisabled("vs_metrics") && vsItems != nil {
-		if err := e.runModule(ch, "vs_metrics", tenant, func() error {
+		if err := e.runModule("vs_metrics", tenant, func() error {
 			return e.collectVSAnalytics(ctx, tenant, vsItems, ch)
 		}); err != nil {
 			tenantOK = false
@@ -117,7 +120,7 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 
 	var poolItems []avi.PoolInventoryItem
 	if !e.cfg.IsModuleDisabled("pool_inventory") || !e.cfg.IsModuleDisabled("pool_metrics") || !e.cfg.IsModuleDisabled("pool_members") || !e.cfg.IsModuleDisabled("topology") {
-		if err := e.runModule(ch, "pool_list", tenant, func() error {
+		if err := e.runModule("pool_list", tenant, func() error {
 			items, err := e.client.ListPoolInventory(ctx, tenant)
 			if err != nil {
 				return err
@@ -129,20 +132,20 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 		}
 	}
 	if !e.cfg.IsModuleDisabled("pool_inventory") && poolItems != nil {
-		e.runModule(ch, "pool_inventory", tenant, func() error {
+		e.runModule("pool_inventory", tenant, func() error {
 			e.collectPoolInventory(ctx, tenant, poolItems, ch)
 			return nil
 		})
 	}
 	if !e.cfg.IsModuleDisabled("pool_metrics") && poolItems != nil {
-		if err := e.runModule(ch, "pool_metrics", tenant, func() error {
+		if err := e.runModule("pool_metrics", tenant, func() error {
 			return e.collectPoolAnalytics(ctx, tenant, poolItems, ch)
 		}); err != nil {
 			tenantOK = false
 		}
 	}
 	if !e.cfg.IsModuleDisabled("pool_members") && poolItems != nil {
-		if err := e.runModule(ch, "pool_members", tenant, func() error {
+		if err := e.runModule("pool_members", tenant, func() error {
 			return e.collectPoolMembers(ctx, tenant, poolItems, ch)
 		}); err != nil {
 			tenantOK = false
@@ -151,7 +154,7 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 
 	var vsvipItems []avi.VsVipInventoryItem
 	if !e.cfg.IsModuleDisabled("vsvip") || !e.cfg.IsModuleDisabled("topology") {
-		if err := e.runModule(ch, "vsvip_list", tenant, func() error {
+		if err := e.runModule("vsvip_list", tenant, func() error {
 			items, err := e.client.ListVsVipInventory(ctx, tenant)
 			if err != nil {
 				return err
@@ -163,32 +166,36 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 		}
 	}
 	if !e.cfg.IsModuleDisabled("vsvip") && vsvipItems != nil {
-		e.runModule(ch, "vsvip", tenant, func() error {
+		e.runModule("vsvip", tenant, func() error {
 			e.collectVsVipInventory(ctx, tenant, vsvipItems, ch)
 			return nil
 		})
 	}
 
 	if !e.cfg.IsModuleDisabled("pool_group") {
-		e.runModule(ch, "pool_group", tenant, func() error {
+		if err := e.runModule("pool_group", tenant, func() error {
 			items, err := e.client.ListPoolGroupInventory(ctx, tenant)
 			if err != nil {
 				return err
 			}
 			e.collectPoolGroupInventory(ctx, tenant, items, ch)
 			return nil
-		})
+		}); err != nil {
+			tenantOK = false
+		}
 	}
 
 	if !e.cfg.IsModuleDisabled("gslb") {
-		e.runModule(ch, "gslb", tenant, func() error {
+		if err := e.runModule("gslb", tenant, func() error {
 			items, err := e.client.ListGslbServiceInventory(ctx, tenant)
 			if err != nil {
 				return err
 			}
 			e.collectGslbServices(ctx, tenant, items, ch)
 			return nil
-		})
+		}); err != nil {
+			tenantOK = false
+		}
 	}
 
 	if !e.cfg.IsModuleDisabled("topology") {
@@ -205,7 +212,7 @@ func (e *Exporter) scrapeTenant(ctx context.Context, tenant string, ch chan<- pr
 
 // runModule wraps one collector call with timing, error counting, and
 // scrape_total/errors_total bookkeeping. tenant may be empty for global modules.
-func (e *Exporter) runModule(ch chan<- prometheus.Metric, module, tenant string, fn func() error) error {
+func (e *Exporter) runModule(module, tenant string, fn func() error) error {
 	start := time.Now()
 	err := fn()
 	dur := time.Since(start).Seconds()

@@ -160,13 +160,3 @@ func chainFor(mi avi.MarkerInfo, name string) string {
 	}
 	return name
 }
-
-// Collect emits all topology metrics. Called once after all tenant scrapes.
-func (e *Exporter) emitTopology(ch chan<- prometheus.Metric) {
-	e.topologyNode.Collect(ch)
-	e.topologyEdge.Collect(ch)
-	e.topologyNodeState.Collect(ch)
-	e.topologyNodeHealth.Collect(ch)
-	e.topologyNodeRequestsTotal.Collect(ch)
-	e.topologyNodeConnections.Collect(ch)
-}

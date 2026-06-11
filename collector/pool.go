@@ -51,17 +51,6 @@ func (e *Exporter) collectPoolInventory(ctx context.Context, tenant string, item
 		e.emitAlertLevel(e.poolAlertLevel, labels, it.Alert.Level)
 		e.emitInfo(e.poolAppProfileType, labels, "app_profile_type", it.AppProfileType)
 	}
-	e.poolOperUp.Collect(ch)
-	e.poolOperStatusInfo.Collect(ch)
-	e.poolEnabled.Collect(ch)
-	e.poolHealthScore.Collect(ch)
-	e.poolNumServers.Collect(ch)
-	e.poolNumServersUp.Collect(ch)
-	e.poolNumServersEnabled.Collect(ch)
-	e.poolPercentServersUpEnabled.Collect(ch)
-	e.poolPercentServersUpTotal.Collect(ch)
-	e.poolAlertLevel.Collect(ch)
-	e.poolAppProfileType.Collect(ch)
 }
 
 // collectPoolMembers runs an N+1 follow-up against /api/pool/<uuid>/runtime/server/detail/
@@ -138,9 +127,6 @@ func (e *Exporter) collectPoolMembers(ctx context.Context, tenant string, items 
 		}()
 	}
 	wg.Wait()
-
-	e.poolMemberOperUp.Collect(ch)
-	e.poolMemberOperStatusInfo.Collect(ch)
 
 	if n := failed.Load(); n > 0 {
 		return fmt.Errorf("%d/%d pool detail calls failed; first error: %w", n, len(items), firstErr)
@@ -244,14 +230,6 @@ func (e *Exporter) collectPoolAnalytics(ctx context.Context, tenant string, item
 			"tenant", tenant, "series", totalSeries)
 	}
 
-	e.poolAvgBandwidth.Collect(ch)
-	e.poolAvgCompleteConns.Collect(ch)
-	e.poolAvgOpenConns.Collect(ch)
-	e.poolAvgTotalRTT.Collect(ch)
-	e.poolAvgRespLatency.Collect(ch)
-	e.poolAvgErrorResp.Collect(ch)
-	e.poolAvgHealthStatus.Collect(ch)
-	e.poolAvgUptime.Collect(ch)
 	return nil
 }
 

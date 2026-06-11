@@ -49,21 +49,6 @@ func (e *Exporter) collectSEInventory(ctx context.Context, items []avi.SEInvento
 		e.emitInfo(e.seVersionInfo, labels, "version", it.Runtime.Version)
 		e.emitInfo(e.seEnableStateInfo, labels, "enable_state", it.Config.EnableState)
 	}
-	e.seOperUp.Collect(ch)
-	e.seOperStatusInfo.Collect(ch)
-	e.seEnabled.Collect(ch)
-	e.seHealthScore.Collect(ch)
-	e.seConnected.Collect(ch)
-	e.seBgpPeersUp.Collect(ch)
-	e.seGatewayUp.Collect(ch)
-	e.seAtCurrVer.Collect(ch)
-	e.seSufficientMem.Collect(ch)
-	e.seLicensedCores.Collect(ch)
-	e.seLicenseState.Collect(ch)
-	e.sePowerState.Collect(ch)
-	e.seMigrateState.Collect(ch)
-	e.seVersionInfo.Collect(ch)
-	e.seEnableStateInfo.Collect(ch)
 }
 
 var seMetricIDs = []string{
@@ -122,19 +107,6 @@ func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInvento
 		}
 	}
 
-	e.seAvgCPUUsage.Collect(ch)
-	e.seAvgMemUsage.Collect(ch)
-	e.seAvgDiskUsage.Collect(ch)
-	e.seAvgConnections.Collect(ch)
-	e.seAvgConnDropped.Collect(ch)
-	e.seAvgRxBytes.Collect(ch)
-	e.seAvgTxBytes.Collect(ch)
-	e.seAvgBandwidth.Collect(ch)
-	e.seAvgConnMem.Collect(ch)
-	e.sePctConnDropped.Collect(ch)
-	e.sePktBufUsage.Collect(ch)
-	e.sePersistTblUsage.Collect(ch)
-	e.seSslSessCache.Collect(ch)
 	return nil
 }
 

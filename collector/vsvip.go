@@ -119,17 +119,5 @@ func (e *Exporter) collectVsVipInventory(ctx context.Context, tenant string, ite
 		}
 	}
 
-	e.vipOperUp.Collect(ch)
-	e.vipOperStatusInfo.Collect(ch)
-	e.vipEnabled.Collect(ch)
-	e.vipPercentSesUp.Collect(ch)
-	e.vipNumSeAssigned.Collect(ch)
-	e.vipNumSeRequested.Collect(ch)
-	e.vipActiveOnSe.Collect(ch)
-	e.vipSharedByVsCount.Collect(ch)
-	e.vipFloatingIP.Collect(ch)
-	e.vipAutoAllocated.Collect(ch)
-	e.vipDNSRecord.Collect(ch)
-
 	_ = ctx
 }
