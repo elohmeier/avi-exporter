@@ -1,0 +1,158 @@
+# Avi Load Balancer Exporter
+
+Prometheus exporter for VMware NSX Advanced Load Balancer (formerly Avi
+Networks). Talks to the Avi Controller's REST API: inventory endpoints for
+current state/health and the analytics `metrics/collection` endpoint for
+time-series counters.
+
+## Design at a glance
+
+- One controller URL + one set of credentials, but **multi-tenant aware** —
+  every per-tenant metric carries a `tenant` label.
+- Auth is session+CSRF (matches the official `alb-sdk`): `POST /login` captures
+  `sessionid`+`csrftoken` cookies, every subsequent request carries
+  `X-CSRFToken`, `Referer`, `X-Avi-Version`, optional `X-Avi-Tenant`. CSRF
+  rotates mid-session and the client picks up the new token from each response.
+- For each scrape: pull inventory endpoints (state, health_score, oper_status),
+  then one bulk `POST /api/analytics/metrics/collection` per entity type using
+  `entity_uuid: "*"` to fan out across all entities.
+- Modules can be disabled if your controller can't serve them or you don't want
+  them.
+- **AKO awareness:** when an object was created by AKO (`created_by` prefix
+  `ako-`), the `markers` field is parsed and `namespace`/`service`/`ingress`/
+  `host` labels are populated automatically.
+- **Topology metrics** (`avi_topology_node`, `avi_topology_edge`) emit a
+  Grafana-node-graph-friendly view of `virtualservice → pool → pool member`,
+  with a `chain` label grouping all nodes belonging to the same AKO app.
+
+## Quick start
+
+### Environment variables
+
+| Variable | Description | Required |
+| --- | --- | --- |
+| `AVI_URL` | Controller URL, e.g. `https://avi.example.com` | yes (or `-url`) |
+| `AVI_USERNAME` | API username | yes |
+| `AVI_PASSWORD` | API password (or API token, passed as password) | yes |
+| `AVI_TENANTS` | Comma-separated tenant names, or `*` for all (default `admin`) | no |
+| `AVI_API_VERSION` | `X-Avi-Version` header (default `30.2.1`) | no |
+| `AVI_IGNORE_CERT` | Skip TLS verification (`true`/`1`) | no |
+| `AVI_CA_FILE` | Path to a CA bundle for TLS verification | no |
+| `AVI_LABELS` | Base labels (`k=v,k=v`), merged with `-labels` | no |
+| `AVI_DISABLED_MODULES` | Base disabled modules, merged with `-disabled-modules` | no |
+
+### CLI flags
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `-url` | Controller URL (overrides `AVI_URL`) | |
+| `-tenants` | Tenants to scrape, comma-separated; `*` for all | `admin` |
+| `-api-version` | `X-Avi-Version` header value | `30.2.1` |
+| `-labels` | Extra labels (`k=v,k=v`) | |
+| `-disabled-modules` | Modules to skip (comma-separated) | |
+| `-metrics-step` | Analytics step in seconds | `300` |
+| `-metrics-limit` | Analytics samples per query | `1` |
+| `-bind-port` | HTTP bind port | `9290` |
+| `-parallelism` | Max concurrent per-tenant scrapers | `5` |
+| `-debug` | Verbose logging | `false` |
+| `-version` | Print version and exit | |
+
+### Examples
+
+Single tenant:
+
+```bash
+export AVI_URL=https://avi.example.com
+export AVI_USERNAME=admin
+export AVI_PASSWORD=secret
+./avi-exporter
+```
+
+Scrape every tenant on the controller and add static labels:
+
+```bash
+./avi-exporter \
+  -url https://avi.example.com \
+  -tenants '*' \
+  -labels "env=prod,site=eu-west" \
+  -disabled-modules "se_metrics"
+```
+
+Docker:
+
+```bash
+docker run -p 9290:9290 \
+  -e AVI_URL=https://avi.example.com \
+  -e AVI_USERNAME=admin -e AVI_PASSWORD=secret \
+  -e AVI_TENANTS='*' \
+  ghcr.io/elohmeier/avi-exporter
+```
+
+## Modules
+
+| Module | Description |
+| --- | --- |
+| `cluster` | Controller cluster + per-node up/leader status |
+| `vs_inventory` | Per-VS oper_status, enabled, health_score, percent_ses_up |
+| `vs_metrics` | Per-VS L4/L7 client analytics (bandwidth, conns, 2xx/4xx/5xx, apdex, RTT) |
+| `pool_inventory` | Per-pool oper_status, health_score, num_servers (and per-member up/enabled) |
+| `pool_metrics` | Per-pool L4/L7 server analytics (RTT, latency, error rate) |
+| `pool_members` | Per-server oper_status. Costs one extra API call per pool (`/api/pool/<uuid>/runtime/server/detail/`). |
+| `pool_group` | Pool group inventory + topology edges (vs → pool_group → pools). Catches SNI/HTTP-policy fan-out invisible to plain VS→pool edges. |
+| `se_inventory` | Per-SE oper_status, enabled, health_score, plus se_connected/bgp_peers_up/gateway_up/license_state/power_state/migrate_state/version. |
+| `se_metrics` | Per-SE CPU/mem/disk/conns/bytes, bandwidth, packet-buffer/persistence/SSL-session-cache usage. |
+| `vsvip` | Per-VsVip oper_status, percent_ses_up, SE placement, floating-IP, auto-allocation, DNS records, plus a `vip_shared_by_vs_count` that exposes shared-listener / SNI patterns. |
+| `gslb` | GSLB service oper_status, enabled, member count, FQDNs. Set `-tenants admin` if your GSLB lives there. |
+| `topology` | Node + edge metrics for Grafana node-graph visualization (`vsvip → vs → (pool \| poolgroup → pool) → poolmember`). |
+
+Disable with `-disabled-modules vs_metrics,se_metrics`.
+
+### Exporter self-metrics (always emitted)
+
+| Metric | Description |
+| --- | --- |
+| `avi_up{tenant}` | 1 if the last per-tenant scrape had no module errors |
+| `avi_scrape_duration_seconds{module,tenant}` | Wall-clock duration of each module's last run |
+| `avi_scrape_total{module,tenant}` | Cumulative attempt count |
+| `avi_scrape_errors_total{module,tenant}` | Cumulative error count |
+
+### Operational-status info metrics
+
+Every entity that has an `*_oper_up` gauge (`vs`, `pool`, `pool_member`, `se`,
+`vip`, `vs_vip`, `gslb_service`) also exposes a parallel `*_oper_status_info`
+metric carrying the raw enum value as a `state` label
+(`OPER_UP`, `OPER_DOWN`, `OPER_DISABLED`, `OPER_PARTITIONED`, `OPER_FAILED`,
+`OPER_RESOURCES`, `OPER_INITIALIZING`, ...). Use these to distinguish
+admin-disabled from genuinely broken.
+
+## Endpoints
+
+| Path | Description |
+| --- | --- |
+| `/metrics` | Prometheus metrics |
+| `/health` | Liveness probe (always 200 OK) |
+
+## Auth & versioning notes
+
+- The Avi controller pins requests to an API schema via the `X-Avi-Version`
+  header. Set `-api-version` to match (or be lower than) your controller's
+  version.
+- API token auth: the controller's `POST /login` accepts either
+  `{"username","password"}` or `{"username","token"}`. The exporter currently
+  only sends the password form (`AVI_PASSWORD`); if you want token auth, paste
+  the generated token into `AVI_PASSWORD` and the controller will accept it
+  for sessions that have token-as-password compatibility enabled, otherwise
+  use a service account. Bearer-token (`Authorization: Bearer ...`) auth is
+  not supported by the on-prem Controller.
+- The exporter is read-only — it only `GET`s inventory and `POST`s the
+  analytics collection endpoint.
+
+## Recommended scrape interval
+
+Avi aggregates analytics on a 5-minute boundary. The defaults (`step=300`,
+`limit=1`) return the latest 5-min average. Scrape at 60-300s; scraping faster
+than the aggregation step gives you no fresher data.
+
+## License
+
+MIT

@@ -1,0 +1,17 @@
+version: 2
+
+builds:
+  - ldflags: -s -w -X main.version={{.Version}}
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+dockers_v2:
+  - images:
+      - ghcr.io/elohmeier/avi-exporter
+    tags:
+      - "{{.Version}}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64

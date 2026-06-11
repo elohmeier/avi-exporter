@@ -1,0 +1,5 @@
+FROM scratch
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/avi-exporter /app
+EXPOSE 9290
+ENTRYPOINT ["/app"]
