@@ -12,7 +12,7 @@ import (
 // vipLabelValues returns label values in vipLbl order:
 // base..., tenant, vsvip, vsvip_uuid, vip_id, ip, namespace, service, ingress, host, ako.
 func (e *Exporter) vipLabelValues(tenant string, item avi.VsVipInventoryItem, vipID, ip string) []string {
-	mi := avi.ParseMarkers(item.Config.Markers)
+	mi := avi.ParseObjectMetadata(item.Config.Markers, item.Config.ServiceMetadata)
 	ako := "false"
 	if avi.IsAKOManaged(item.Config.CreatedBy) {
 		ako = "true"
@@ -23,7 +23,7 @@ func (e *Exporter) vipLabelValues(tenant string, item avi.VsVipInventoryItem, vi
 
 // vipPlacementLabelValues mirrors vipPlacementLbl.
 func (e *Exporter) vipPlacementLabelValues(tenant string, item avi.VsVipInventoryItem, vipID, seName, seUUID string, primary bool) []string {
-	mi := avi.ParseMarkers(item.Config.Markers)
+	mi := avi.ParseObjectMetadata(item.Config.Markers, item.Config.ServiceMetadata)
 	ako := "false"
 	if avi.IsAKOManaged(item.Config.CreatedBy) {
 		ako = "true"
@@ -38,7 +38,7 @@ func (e *Exporter) vipPlacementLabelValues(tenant string, item avi.VsVipInventor
 
 // vipDNSLabelValues mirrors vipDNSLbl.
 func (e *Exporter) vipDNSLabelValues(tenant string, item avi.VsVipInventoryItem, fqdn, recType, ttl string) []string {
-	mi := avi.ParseMarkers(item.Config.Markers)
+	mi := avi.ParseObjectMetadata(item.Config.Markers, item.Config.ServiceMetadata)
 	ako := "false"
 	if avi.IsAKOManaged(item.Config.CreatedBy) {
 		ako = "true"

@@ -29,7 +29,7 @@ func (e *Exporter) collectTopology(tenant string, vsItems []avi.VSInventoryItem,
 	// VsVip nodes + vsvip→vs edges.
 	for _, vv := range vsvipItems {
 		nodeID := "vsvip:" + vv.Config.UUID
-		mi := avi.ParseMarkers(vv.Config.Markers)
+		mi := avi.ParseObjectMetadata(vv.Config.Markers, vv.Config.ServiceMetadata)
 		chain := chainFor(mi, vv.Config.Name)
 
 		// Aggregate state across all VIPs in this VsVip.

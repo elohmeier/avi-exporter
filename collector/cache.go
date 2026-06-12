@@ -543,7 +543,7 @@ func (e *Exporter) refreshTenant(ctx context.Context, tenant string) error {
 			if err != nil {
 				return err
 			}
-			vsvipItems = items
+			vsvipItems = enrichVsVipInventory(items, vsItems)
 			vsvipListOK = true
 			return nil
 		}))

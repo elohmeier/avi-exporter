@@ -448,18 +448,19 @@ func (v *VsRef) UnmarshalJSON(b []byte) error {
 
 // VsVipConfig is the config block from /api/vsvip-inventory.
 type VsVipConfig struct {
-	UUID              string    `json:"uuid"`
-	Name              string    `json:"name"`
-	URL               string    `json:"url,omitempty"`
-	CloudRef          string    `json:"cloud_ref,omitempty"`
-	TenantRef         string    `json:"tenant_ref,omitempty"`
-	VrfContextRef     string    `json:"vrf_context_ref,omitempty"`
-	CreatedBy         string    `json:"created_by,omitempty"`
-	Markers           []Marker  `json:"markers,omitempty"`
-	Vip               []Vip     `json:"vip,omitempty"`
-	DNSInfo           []DNSInfo `json:"dns_info,omitempty"`
-	VirtualServices   []VsRef   `json:"virtualservices,omitempty"`
-	EastWestPlacement *bool     `json:"east_west_placement,omitempty"`
+	UUID              string          `json:"uuid"`
+	Name              string          `json:"name"`
+	URL               string          `json:"url,omitempty"`
+	CloudRef          string          `json:"cloud_ref,omitempty"`
+	TenantRef         string          `json:"tenant_ref,omitempty"`
+	VrfContextRef     string          `json:"vrf_context_ref,omitempty"`
+	CreatedBy         string          `json:"created_by,omitempty"`
+	Markers           []Marker        `json:"markers,omitempty"`
+	ServiceMetadata   ServiceMetadata `json:"service_metadata,omitempty"`
+	Vip               []Vip           `json:"vip,omitempty"`
+	DNSInfo           []DNSInfo       `json:"dns_info,omitempty"`
+	VirtualServices   []VsRef         `json:"virtualservices,omitempty"`
+	EastWestPlacement *bool           `json:"east_west_placement,omitempty"`
 }
 
 // VipSeAssigned is one SE→VIP placement entry shared by VsVipRuntime and

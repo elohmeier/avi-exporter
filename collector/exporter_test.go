@@ -130,6 +130,7 @@ func TestMetadataEnrichmentUsesConfigEndpoints(t *testing.T) {
 					{
 						"uuid":       "vs-a",
 						"name":       "vs-a",
+						"vsvip_ref":  "https://controller.example/api/vsvip/vsvip-a",
 						"created_by": "ako-cluster-a",
 						"markers": []map[string]any{
 							{"key": "Namespace", "values": []string{"team-a"}},
@@ -138,6 +139,37 @@ func TestMetadataEnrichmentUsesConfigEndpoints(t *testing.T) {
 							"namespace_svc_name": []string{"team-a/svc-a"},
 							"ingress_name":       "ing-a",
 							"hostnames":          []string{"app.example.com"},
+						},
+					},
+				},
+			})
+		case "/api/vsvip-inventory":
+			writeJSON(t, w, map[string]any{
+				"count": 1,
+				"results": []map[string]any{
+					{
+						"config": map[string]any{
+							"uuid": "vsvip-a",
+							"name": "vip-a",
+							"markers": []map[string]any{
+								{"key": "clustername", "values": []string{"cluster-a"}},
+							},
+							"vip": []map[string]any{
+								{
+									"vip_id":     "1",
+									"enabled":    true,
+									"ip_address": map[string]any{"addr": "192.0.2.10", "type": "V4"},
+								},
+							},
+						},
+						"runtime": []map[string]any{
+							{
+								"vip_id":           "1",
+								"oper_status":      map[string]any{"state": "OPER_UP"},
+								"percent_ses_up":   100,
+								"num_se_assigned":  1,
+								"num_se_requested": 1,
+							},
 						},
 					},
 				},
@@ -194,7 +226,7 @@ func TestMetadataEnrichmentUsesConfigEndpoints(t *testing.T) {
 		"se_inventory", "se_metrics",
 		"vs_metrics",
 		"pool_metrics", "pool_members",
-		"vsvip", "pool_group", "gslb", "topology",
+		"pool_group", "gslb", "topology",
 	})
 	mfs := gatherExporter(t, cfg, controller.URL, 1)
 
@@ -222,6 +254,23 @@ func TestMetadataEnrichmentUsesConfigEndpoints(t *testing.T) {
 		"ako":       "true",
 	}); got != 1 {
 		t.Fatalf("enriched pool oper up = %v, want 1", got)
+	}
+
+	vipOperUp := metricFamily(t, mfs, "avi_vip_oper_up")
+	vipLabels := map[string]string{
+		"tenant":     "tenant-a",
+		"vsvip_uuid": "vsvip-a",
+		"namespace":  "team-a",
+		"service":    "svc-a",
+		"ingress":    "ing-a",
+		"host":       "app.example.com",
+		"ako":        "true",
+	}
+	if got := metricValueForLabels(t, vipOperUp, vipLabels); got != 1 {
+		t.Fatalf("enriched VIP oper up = %v, want 1", got)
+	}
+	if got := metricValueForLabels(t, metricFamily(t, mfs, "avi_vip_shared_by_vs_count"), vipLabels); got != 1 {
+		t.Fatalf("enriched VIP shared VS count = %v, want 1", got)
 	}
 }
 
