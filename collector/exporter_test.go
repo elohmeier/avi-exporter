@@ -353,6 +353,7 @@ func TestReadyFailsWhenTenantModuleDataIsMissing(t *testing.T) {
 func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 	var seInventoryCalls atomic.Int64
 	var seMetricsCalls atomic.Int64
+	seenMetricIDs := map[string]bool{}
 	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/serviceengine-inventory":
@@ -367,16 +368,24 @@ func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 				t.Fatalf("SE prometheus endpoint tenant query = %q", got)
 			}
 			metricID := r.URL.Query().Get("metric_id")
-			for _, want := range []string{"se_stats.avg_cpu_usage", "se_stats.avg_mem_usage", "se_if.avg_bandwidth"} {
-				if !strings.Contains(metricID, want) {
-					t.Fatalf("SE prometheus endpoint metric_id %q missing %q", metricID, want)
-				}
+			if strings.Contains(metricID, ",") {
+				t.Fatalf("SE prometheus endpoint metric_id = %q, want one metric per request", metricID)
 			}
+			seenMetricIDs[metricID] = true
 			w.Header().Set("Content-Type", "text/plain")
-			_, _ = fmt.Fprintln(w, "# Successfully gathered 3 metrics for serviceengine")
-			_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 3.5`)
-			_, _ = fmt.Fprintln(w, `avi_se_if_avg_bandwidth{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 42`)
-			_, _ = fmt.Fprintln(w, `avi_se_stats_avg_mem_usage{uuid="se-2",type="serviceengine",tenant="admin",name="se-two"} 7`)
+			switch metricID {
+			case "se_stats.avg_cpu_usage":
+				_, _ = fmt.Fprintln(w, "# Successfully gathered 1 metrics for serviceengine")
+				_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 3.5`)
+			case "se_if.avg_bandwidth":
+				_, _ = fmt.Fprintln(w, "# Successfully gathered 1 metrics for serviceengine")
+				_, _ = fmt.Fprintln(w, `avi_se_if_avg_bandwidth{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 42`)
+			case "se_stats.avg_mem_usage":
+				_, _ = fmt.Fprintln(w, "# Successfully gathered 1 metrics for serviceengine")
+				_, _ = fmt.Fprintln(w, `avi_se_stats_avg_mem_usage{uuid="se-2",type="serviceengine",tenant="admin",name="se-two"} 7`)
+			default:
+				_, _ = fmt.Fprintln(w, "# Successfully gathered 0 metrics for serviceengine")
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -401,8 +410,13 @@ func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 	if got := seInventoryCalls.Load(); got != 1 {
 		t.Fatalf("SE inventory calls = %d, want 1", got)
 	}
-	if got := seMetricsCalls.Load(); got != 1 {
-		t.Fatalf("SE prometheus endpoint calls = %d, want 1", got)
+	if got := seMetricsCalls.Load(); got != int64(len(seMetricIDs)) {
+		t.Fatalf("SE prometheus endpoint calls = %d, want %d", got, len(seMetricIDs))
+	}
+	for _, want := range []string{"se_stats.avg_cpu_usage", "se_stats.avg_mem_usage", "se_if.avg_bandwidth"} {
+		if !seenMetricIDs[want] {
+			t.Fatalf("SE prometheus endpoint never requested %q", want)
+		}
 	}
 
 	mfs := gatherRegisteredExporter(t, exp)

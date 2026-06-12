@@ -79,7 +79,6 @@ var seMetricIDs = []string{
 	"se_stats.avg_rx_bandwidth",
 	"se_stats.avg_ssl_session_cache_usage",
 	"se_stats.max_se_bandwidth",
-	"se_stats.pct_connections_dropped",
 	"se_stats.pct_syn_cache_usage",
 	"healthscore.health_score_value",
 }
@@ -124,6 +123,18 @@ func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInvento
 }
 
 func (e *Exporter) collectBuiltinPrometheusMetrics(ctx context.Context, resource string, tenants []string, metricIDs []string) (map[string]*dto.MetricFamily, error) {
+	merged := make(map[string]*dto.MetricFamily)
+	for _, batch := range builtinPrometheusMetricBatches(resource, metricIDs) {
+		families, err := e.collectBuiltinPrometheusMetricBatch(ctx, resource, tenants, batch)
+		if err != nil {
+			return nil, fmt.Errorf("%s metrics %s: %w", resource, strings.Join(batch, ","), err)
+		}
+		mergeMetricFamilies(merged, families)
+	}
+	return merged, nil
+}
+
+func (e *Exporter) collectBuiltinPrometheusMetricBatch(ctx context.Context, resource string, tenants []string, metricIDs []string) (map[string]*dto.MetricFamily, error) {
 	query := url.Values{}
 	query.Set("tenant", strings.Join(tenants, ","))
 	query.Set("metric_id", strings.Join(metricIDs, ","))
@@ -139,6 +150,50 @@ func (e *Exporter) collectBuiltinPrometheusMetrics(ctx context.Context, resource
 		return nil, fmt.Errorf("parse %s prometheus metrics: %w", resource, err)
 	}
 	return families, nil
+}
+
+func builtinPrometheusMetricBatches(resource string, metricIDs []string) [][]string {
+	if resource == "serviceengine" {
+		out := make([][]string, 0, len(metricIDs))
+		for _, id := range metricIDs {
+			out = append(out, []string{id})
+		}
+		return out
+	}
+	return groupedMetricIDs(metricIDs)
+}
+
+func groupedMetricIDs(metricIDs []string) [][]string {
+	out := make([][]string, 0)
+	indexByGroup := make(map[string]int)
+	for _, id := range metricIDs {
+		group := metricIDGroup(id)
+		idx, ok := indexByGroup[group]
+		if !ok {
+			idx = len(out)
+			indexByGroup[group] = idx
+			out = append(out, nil)
+		}
+		out[idx] = append(out[idx], id)
+	}
+	return out
+}
+
+func metricIDGroup(metricID string) string {
+	if idx := strings.IndexByte(metricID, '.'); idx > 0 {
+		return metricID[:idx]
+	}
+	return metricID
+}
+
+func mergeMetricFamilies(dst, src map[string]*dto.MetricFamily) {
+	for name, family := range src {
+		if existing := dst[name]; existing != nil {
+			existing.Metric = append(existing.Metric, family.GetMetric()...)
+			continue
+		}
+		dst[name] = family
+	}
 }
 
 func (e *Exporter) seMetricTenants() []string {

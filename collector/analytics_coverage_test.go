@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -187,6 +188,37 @@ func TestLegacyAnalyticsMetricIDsHaveGauges(t *testing.T) {
 		if tc.gauge(tc.family) == nil {
 			t.Fatalf("%s prometheus family %q has no gauge", tc.name, tc.family)
 		}
+	}
+}
+
+func TestBuiltinPrometheusMetricBatches(t *testing.T) {
+	metricIDs := []string{
+		"se_if.avg_bandwidth",
+		"se_stats.avg_cpu_usage",
+		"se_if.avg_rx_bytes",
+		"healthscore.health_score_value",
+		"bare",
+	}
+
+	wantServiceEngine := [][]string{
+		{"se_if.avg_bandwidth"},
+		{"se_stats.avg_cpu_usage"},
+		{"se_if.avg_rx_bytes"},
+		{"healthscore.health_score_value"},
+		{"bare"},
+	}
+	if got := builtinPrometheusMetricBatches("serviceengine", metricIDs); !reflect.DeepEqual(got, wantServiceEngine) {
+		t.Fatalf("serviceengine batches = %#v, want %#v", got, wantServiceEngine)
+	}
+
+	wantGrouped := [][]string{
+		{"se_if.avg_bandwidth", "se_if.avg_rx_bytes"},
+		{"se_stats.avg_cpu_usage"},
+		{"healthscore.health_score_value"},
+		{"bare"},
+	}
+	if got := builtinPrometheusMetricBatches("virtualservice", metricIDs); !reflect.DeepEqual(got, wantGrouped) {
+		t.Fatalf("virtualservice batches = %#v, want %#v", got, wantGrouped)
 	}
 }
 
