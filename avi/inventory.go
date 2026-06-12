@@ -105,10 +105,9 @@ func (c *Client) ListGslbServiceInventory(ctx context.Context, tenant string) ([
 }
 
 // GetPoolRuntimeDetail returns the per-server runtime for one pool. The
-// canonical 22.1+ endpoint is /api/pool/{uuid}/runtime/server/detail/. Some
-// controllers return an array directly; others wrap it in {server:[...]}.
-// We capture the raw bytes once and try both unmarshal shapes locally so an
-// empty pool doesn't trigger a second HTTP request.
+// canonical 22.1+ endpoint is /api/pool/{uuid}/runtime/server/detail/. Avi
+// versions differ: some return the normal page envelope {results,next}, some
+// return an array directly, and others wrap it in {server:[...]}.
 func (c *Client) GetPoolRuntimeDetail(ctx context.Context, tenant, poolUUID string) ([]ServerRuntimeDetail, error) {
 	path := "/api/pool/" + poolUUID + "/runtime/server/detail/"
 	var raw json.RawMessage
@@ -123,6 +122,12 @@ func (c *Client) GetPoolRuntimeDetail(ctx context.Context, tenant, poolUUID stri
 	if err := json.Unmarshal(raw, &arr); err == nil {
 		return arr, nil
 	}
+
+	var page PageResp[ServerRuntimeDetail]
+	if err := json.Unmarshal(raw, &page); err == nil && (page.Results != nil || page.Next != nil || page.Count > 0) {
+		return listAll[ServerRuntimeDetail](ctx, c, path, tenant, nil)
+	}
+
 	// Fall back to wrapped {server:[...]}.
 	var wrapped PoolRuntimeDetail
 	if err := json.Unmarshal(raw, &wrapped); err != nil {

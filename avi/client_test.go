@@ -522,6 +522,15 @@ func TestInventoryWrappers(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"ip_addr":{"addr":"10.0.0.1"},"port":80,"oper_status":{"state":"OPER_UP"}}]`))
 		case "/api/pool/wrapped/runtime/server/detail/":
 			_, _ = w.Write([]byte(`{"server":[{"ip_addr":{"addr":"10.0.0.2"},"port":443,"oper_status":{"state":"OPER_DOWN"}}]}`))
+		case "/api/pool/paged/runtime/server/detail/":
+			if got := r.URL.Query().Get("page_size"); got != "" && got != "200" {
+				t.Fatalf("pool detail page_size = %q", got)
+			}
+			if r.URL.Query().Get("page") == "2" {
+				_, _ = w.Write([]byte(`{"results":[{"ip_addr":{"addr":"10.0.0.4"},"port":8443,"oper_status":{"state":"OPER_DOWN"}}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"results":[{"ip_addr":{"addr":"10.0.0.3"},"port":8080,"oper_status":{"state":"OPER_UP"}}],"next":"/api/pool/paged/runtime/server/detail/?page=2"}`))
 		case "/api/pool/bad/runtime/server/detail/":
 			_, _ = w.Write([]byte(`"bad"`))
 		default:
@@ -568,6 +577,9 @@ func TestInventoryWrappers(t *testing.T) {
 	}
 	if items, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "wrapped"); err != nil || len(items) != 1 || items[0].Port != 443 {
 		t.Fatalf("GetPoolRuntimeDetail wrapped = %#v, %v", items, err)
+	}
+	if items, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "paged"); err != nil || len(items) != 2 || items[1].Port != 8443 {
+		t.Fatalf("GetPoolRuntimeDetail paged = %#v, %v", items, err)
 	}
 	if _, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "bad"); err == nil {
 		t.Fatalf("GetPoolRuntimeDetail accepted invalid shape")
