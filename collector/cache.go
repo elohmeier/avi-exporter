@@ -205,6 +205,9 @@ func (e *Exporter) configuredTenants() ([]string, bool) {
 	if len(names) == 0 && !wildcard {
 		names = []string{"admin"}
 	}
+	if len(names) == 0 {
+		return nil, wildcard
+	}
 	return normalizeTenants(names), wildcard
 }
 
@@ -323,15 +326,13 @@ func (e *Exporter) refreshServiceEngines(ctx context.Context) error {
 	}
 
 	if !e.cfg.IsModuleDisabled("se_inventory") {
-		if err := e.runModule(ctx, "se_inventory", "", func(ctx context.Context) error {
+		_ = e.runModule(ctx, "se_inventory", "", func(ctx context.Context) error {
 			e.cacheMu.Lock()
 			defer e.cacheMu.Unlock()
 			resetGaugeVecs(e.seInventoryGaugeVecs()...)
 			e.collectSEInventory(ctx, seItems, nil)
 			return nil
-		}); err != nil {
-			errs = append(errs, err)
-		}
+		})
 	}
 
 	if !e.cfg.IsModuleDisabled("se_metrics") {
@@ -367,6 +368,12 @@ func (e *Exporter) refreshTenantSet(ctx context.Context, tenants []string) error
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				record(ctx.Err())
+				return
+			default:
+			}
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()

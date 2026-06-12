@@ -92,6 +92,11 @@ func (e *Exporter) collectPoolMemberDetails(ctx context.Context, tenant string, 
 		go func() {
 			defer wg.Done()
 			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
 			case <-ctx.Done():

@@ -107,10 +107,7 @@ func (c *Client) Login(ctx context.Context) error {
 		"username": c.username,
 		"password": c.password,
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal login payload: %w", err)
-	}
+	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/login", bytes.NewReader(body))
 	if err != nil {

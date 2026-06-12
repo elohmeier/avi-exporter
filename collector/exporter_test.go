@@ -552,9 +552,15 @@ func TestWildcardTenantRefreshRemovesDroppedTenantMetrics(t *testing.T) {
 	if got := countMetricsWithLabel(vsOperUp, "tenant", "tenant-b"); got != 1 {
 		t.Fatalf("tenant-b metric count = %d, want 1", got)
 	}
+	if got := countMetricsWithLabel(vsOperUp, "tenant", "admin"); got != 0 {
+		t.Fatalf("unexpected implicit admin metric count = %d, want 0", got)
+	}
 	for _, module := range exp.CacheStatus().Modules {
 		if module.Tenant == "tenant-a" {
 			t.Fatalf("removed tenant-a still present in cache module status: %+v", module)
+		}
+		if module.Tenant == "admin" {
+			t.Fatalf("implicit admin still present in cache module status: %+v", module)
 		}
 	}
 }

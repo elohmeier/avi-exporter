@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,12 +19,26 @@ import (
 )
 
 var (
-	app     = "Avi-Load-Balancer-Exporter"
-	version string
-	build   string
+	app         = "Avi-Load-Balancer-Exporter"
+	version     string
+	build       string
+	exitProcess = os.Exit
+	serveHTTP   = func(srv *http.Server) error {
+		return srv.ListenAndServe()
+	}
 )
 
 func main() {
+	exitProcess(run(os.Args[1:], os.Stdout, os.Stderr, serveHTTP))
+}
+
+func run(args []string, stdout, stderr io.Writer, serve func(*http.Server) error) int {
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
 	var (
 		url             string
 		tenantsStr      string
@@ -38,29 +53,33 @@ func main() {
 		debug           bool
 	)
 
-	flag.StringVar(&url, "url", "", "Avi controller URL (e.g., https://avi.example.com)")
-	flag.StringVar(&tenantsStr, "tenants", "", "Comma-separated list of tenant names to scrape, or '*' for all tenants")
-	flag.StringVar(&apiVersion, "api-version", "", "X-Avi-Version header (e.g., 30.2.1)")
-	flag.StringVar(&labelsStr, "labels", "", "Custom labels in key=value format, comma-separated")
-	flag.StringVar(&disabledModules, "disabled-modules", "", "Comma-separated list of modules to disable")
-	flag.IntVar(&metricsStep, "metrics-step", 300, "Analytics metrics step in seconds")
-	flag.IntVar(&metricsLimit, "metrics-limit", 1, "Analytics metrics sample count per query")
-	flag.IntVar(&bindPort, "bind-port", 9290, "Port to bind the exporter endpoint to")
-	flag.IntVar(&parallelism, "parallelism", 5, "Maximum concurrent API requests")
-	flag.BoolVar(&showVersion, "version", false, "Display application version")
-	flag.BoolVar(&debug, "debug", false, "Enable debug logging")
-	flag.Parse()
+	fs := flag.NewFlagSet(app, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&url, "url", "", "Avi controller URL (e.g., https://avi.example.com)")
+	fs.StringVar(&tenantsStr, "tenants", "", "Comma-separated list of tenant names to scrape, or '*' for all tenants")
+	fs.StringVar(&apiVersion, "api-version", "", "X-Avi-Version header (e.g., 30.2.1)")
+	fs.StringVar(&labelsStr, "labels", "", "Custom labels in key=value format, comma-separated")
+	fs.StringVar(&disabledModules, "disabled-modules", "", "Comma-separated list of modules to disable")
+	fs.IntVar(&metricsStep, "metrics-step", 300, "Analytics metrics step in seconds")
+	fs.IntVar(&metricsLimit, "metrics-limit", 1, "Analytics metrics sample count per query")
+	fs.IntVar(&bindPort, "bind-port", 9290, "Port to bind the exporter endpoint to")
+	fs.IntVar(&parallelism, "parallelism", 5, "Maximum concurrent API requests")
+	fs.BoolVar(&showVersion, "version", false, "Display application version")
+	fs.BoolVar(&debug, "debug", false, "Enable debug logging")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	if showVersion {
-		fmt.Printf("%s v%s build %s\n", app, version, build)
-		os.Exit(0)
+		fmt.Fprintf(stdout, "%s v%s build %s\n", app, version, build)
+		return 0
 	}
 
 	logLevel := slog.LevelInfo
 	if debug {
 		logLevel = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	logger := slog.New(slog.NewTextHandler(stdout, &slog.HandlerOptions{
 		Level:     logLevel,
 		AddSource: true,
 	})).With("app", app, "version", "v"+version, "build", build)
@@ -70,8 +89,8 @@ func main() {
 	}
 	if url == "" {
 		logger.Error("URL is required (use -url flag or AVI_URL env var)")
-		flag.Usage()
-		os.Exit(1)
+		fs.Usage()
+		return 1
 	}
 
 	if apiVersion == "" {
@@ -112,7 +131,7 @@ func main() {
 	username, password := config.GetCredentials()
 	if username == "" {
 		logger.Error("credentials are required (set AVI_USERNAME and AVI_PASSWORD)")
-		os.Exit(1)
+		return 1
 	}
 
 	ignoreCert := config.GetIgnoreCert()
@@ -136,25 +155,28 @@ func main() {
 	exporter, err := collector.NewExporter(cfg, url, username, password, ignoreCert, caFile, parallelism, logger)
 	if err != nil {
 		logger.Error("failed to create exporter", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	exporter.Start(context.Background())
+	defer exporter.Stop()
 
-	prometheus.MustRegister(exporter)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(exporter)
 
-	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK\n"))
+		_, _ = w.Write([]byte("OK\n"))
 	})
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK\n"))
+		_, _ = w.Write([]byte("OK\n"))
 	})
-	http.HandleFunc("/readyz", exporter.ReadyHandler)
-	http.HandleFunc("/debug/cache", exporter.DebugCacheHandler)
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(app + "\n\nEndpoints:\n  /metrics\n  /healthz\n  /readyz\n  /debug/cache\n"))
+	mux.HandleFunc("/readyz", exporter.ReadyHandler)
+	mux.HandleFunc("/debug/cache", exporter.DebugCacheHandler)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(app + "\n\nEndpoints:\n  /metrics\n  /healthz\n  /readyz\n  /debug/cache\n"))
 	})
 
 	listenAddr := ":" + strconv.Itoa(bindPort)
@@ -162,11 +184,16 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              listenAddr,
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	if err := srv.ListenAndServe(); err != nil {
-		logger.Error("server error", "err", err)
-		os.Exit(1)
+	if serve == nil {
+		serve = serveHTTP
 	}
+	if err := serve(srv); err != nil {
+		logger.Error("server error", "err", err)
+		return 1
+	}
+	return 0
 }
