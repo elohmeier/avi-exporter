@@ -1,12 +1,134 @@
 package avi
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Marker mirrors RoleFilterMatchLabel — the schema AKO uses to tag Avi objects
 // with Kubernetes metadata (Namespace, ServiceName, IngressName, Host, ...).
 type Marker struct {
 	Key    string   `json:"key"`
 	Values []string `json:"values"`
+}
+
+// ServiceMetadata is AKO's service_metadata object. Avi versions and
+// endpoints differ: some return it as an object, others as a JSON string.
+type ServiceMetadata struct {
+	Namespace             string   `json:"namespace,omitempty"`
+	IngressName           string   `json:"ingress_name,omitempty"`
+	NamespaceIngressName  []string `json:"namespace_ingress_name,omitempty"`
+	Hostnames             []string `json:"hostnames,omitempty"`
+	NamespaceSvcName      []string `json:"namespace_svc_name,omitempty"`
+	HostNamespaceIngress  []string `json:"host_namespace_ingress_name,omitempty"`
+	HTTPRoute             string   `json:"httproute,omitempty"`
+	HTTPRouteRuleName     string   `json:"httproute_rule_name,omitempty"`
+	Gateway               string   `json:"gateway,omitempty"`
+	PassthroughParentRef  string   `json:"passthrough_parent_ref,omitempty"`
+	PassthroughChildRef   string   `json:"passthrough_child_ref,omitempty"`
+	IsMCIIngress          bool     `json:"is_mci_ingress,omitempty"`
+	InsecureEdgeTermAllow bool     `json:"insecureedgetermallow,omitempty"`
+	FQDNReusePolicy       string   `json:"fqdn_reuse_policy,omitempty"`
+}
+
+// Empty reports whether the metadata contains no label-worthy AKO data.
+func (m ServiceMetadata) Empty() bool {
+	return m.Namespace == "" &&
+		m.IngressName == "" &&
+		len(m.NamespaceIngressName) == 0 &&
+		len(m.Hostnames) == 0 &&
+		len(m.NamespaceSvcName) == 0 &&
+		len(m.HostNamespaceIngress) == 0 &&
+		m.HTTPRoute == "" &&
+		m.HTTPRouteRuleName == "" &&
+		m.Gateway == "" &&
+		m.PassthroughParentRef == "" &&
+		m.PassthroughChildRef == ""
+}
+
+func (m *ServiceMetadata) UnmarshalJSON(b []byte) error {
+	raw := strings.TrimSpace(string(b))
+	if raw == "" || raw == "null" {
+		*m = ServiceMetadata{}
+		return nil
+	}
+	if strings.HasPrefix(raw, `"`) {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		s = strings.TrimSpace(s)
+		if s == "" || s == "null" {
+			*m = ServiceMetadata{}
+			return nil
+		}
+		return json.Unmarshal([]byte(s), m)
+	}
+
+	var r struct {
+		Namespace             string         `json:"namespace"`
+		IngressName           string         `json:"ingress_name"`
+		NamespaceIngressName  flexStringList `json:"namespace_ingress_name"`
+		Hostnames             flexStringList `json:"hostnames"`
+		NamespaceSvcName      flexStringList `json:"namespace_svc_name"`
+		HostNamespaceIngress  flexStringList `json:"host_namespace_ingress_name"`
+		HTTPRoute             string         `json:"httproute"`
+		HTTPRouteRuleName     string         `json:"httproute_rule_name"`
+		Gateway               string         `json:"gateway"`
+		PassthroughParentRef  string         `json:"passthrough_parent_ref"`
+		PassthroughChildRef   string         `json:"passthrough_child_ref"`
+		IsMCIIngress          bool           `json:"is_mci_ingress"`
+		InsecureEdgeTermAllow bool           `json:"insecureedgetermallow"`
+		FQDNReusePolicy       string         `json:"fqdn_reuse_policy"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	*m = ServiceMetadata{
+		Namespace:             r.Namespace,
+		IngressName:           r.IngressName,
+		NamespaceIngressName:  []string(r.NamespaceIngressName),
+		Hostnames:             []string(r.Hostnames),
+		NamespaceSvcName:      []string(r.NamespaceSvcName),
+		HostNamespaceIngress:  []string(r.HostNamespaceIngress),
+		HTTPRoute:             r.HTTPRoute,
+		HTTPRouteRuleName:     r.HTTPRouteRuleName,
+		Gateway:               r.Gateway,
+		PassthroughParentRef:  r.PassthroughParentRef,
+		PassthroughChildRef:   r.PassthroughChildRef,
+		IsMCIIngress:          r.IsMCIIngress,
+		InsecureEdgeTermAllow: r.InsecureEdgeTermAllow,
+		FQDNReusePolicy:       r.FQDNReusePolicy,
+	}
+	return nil
+}
+
+type flexStringList []string
+
+func (l *flexStringList) UnmarshalJSON(b []byte) error {
+	raw := strings.TrimSpace(string(b))
+	if raw == "" || raw == "null" {
+		*l = nil
+		return nil
+	}
+	if strings.HasPrefix(raw, `"`) {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		if s == "" {
+			*l = nil
+			return nil
+		}
+		*l = []string{s}
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal(b, &values); err != nil {
+		return err
+	}
+	*l = values
+	return nil
 }
 
 // PageResp is the generic collection envelope (`{count,next,previous,results}`).
@@ -92,23 +214,25 @@ type IPAddr struct {
 
 // VSConfig is the per-VS config block (subset of fields we read).
 type VSConfig struct {
-	UUID         string    `json:"uuid"`
-	Name         string    `json:"name"`
-	URL          string    `json:"url,omitempty"`
-	Enabled      *bool     `json:"enabled,omitempty"`
-	Type         string    `json:"type,omitempty"` // VS_TYPE_NORMAL / VS_TYPE_VH_PARENT / VS_TYPE_VH_CHILD
-	Fqdn         string    `json:"fqdn,omitempty"`
-	CloudRef     string    `json:"cloud_ref,omitempty"`
-	TenantRef    string    `json:"tenant_ref,omitempty"`
-	VsvipRef     string    `json:"vsvip_ref,omitempty"`
-	PoolRef      string    `json:"pool_ref,omitempty"`
-	PoolGroupRef string    `json:"pool_group_ref,omitempty"`
-	SeGroupRef   string    `json:"se_group_ref,omitempty"`
-	CreatedBy    string    `json:"created_by,omitempty"`
-	Markers      []Marker  `json:"markers,omitempty"`
-	Services     []Service `json:"services,omitempty"`
-	VIP          []Vip     `json:"vip,omitempty"`
-	DNSInfo      []DNSInfo `json:"dns_info,omitempty"`
+	UUID            string          `json:"uuid"`
+	Name            string          `json:"name"`
+	URL             string          `json:"url,omitempty"`
+	Enabled         *bool           `json:"enabled,omitempty"`
+	Type            string          `json:"type,omitempty"` // VS_TYPE_NORMAL / VS_TYPE_VH_PARENT / VS_TYPE_VH_CHILD
+	Fqdn            string          `json:"fqdn,omitempty"`
+	CloudRef        string          `json:"cloud_ref,omitempty"`
+	TenantRef       string          `json:"tenant_ref,omitempty"`
+	VsvipRef        string          `json:"vsvip_ref,omitempty"`
+	PoolRef         string          `json:"pool_ref,omitempty"`
+	PoolGroupRef    string          `json:"pool_group_ref,omitempty"`
+	SeGroupRef      string          `json:"se_group_ref,omitempty"`
+	CreatedBy       string          `json:"created_by,omitempty"`
+	Markers         []Marker        `json:"markers,omitempty"`
+	ServiceMetadata ServiceMetadata `json:"service_metadata,omitempty"`
+	Services        []Service       `json:"services,omitempty"`
+	VIP             []Vip           `json:"vip,omitempty"`
+	DNSInfo         []DNSInfo       `json:"dns_info,omitempty"`
+	VHParentVSRef   string          `json:"vh_parent_vs_ref,omitempty"`
 }
 
 // Service is one (port, protocol) listener bound to a VS.
@@ -155,16 +279,18 @@ type VSInventoryItem struct {
 // PoolConfig is the (summary) config block on /api/pool-inventory entries.
 // It does NOT include `servers[]` — that requires /api/pool/{uuid}.
 type PoolConfig struct {
-	UUID          string   `json:"uuid"`
-	Name          string   `json:"name"`
-	URL           string   `json:"url,omitempty"`
-	Enabled       *bool    `json:"enabled,omitempty"`
-	TenantRef     string   `json:"tenant_ref,omitempty"`
-	CloudRef      string   `json:"cloud_ref,omitempty"`
-	VrfRef        string   `json:"vrf_ref,omitempty"`
-	CreatedBy     string   `json:"created_by,omitempty"`
-	GslbSpEnabled *bool    `json:"gslb_sp_enabled,omitempty"`
-	Markers       []Marker `json:"markers,omitempty"`
+	UUID            string          `json:"uuid"`
+	Name            string          `json:"name"`
+	URL             string          `json:"url,omitempty"`
+	Enabled         *bool           `json:"enabled,omitempty"`
+	TenantRef       string          `json:"tenant_ref,omitempty"`
+	CloudRef        string          `json:"cloud_ref,omitempty"`
+	VrfRef          string          `json:"vrf_ref,omitempty"`
+	CreatedBy       string          `json:"created_by,omitempty"`
+	GslbSpEnabled   *bool           `json:"gslb_sp_enabled,omitempty"`
+	Markers         []Marker        `json:"markers,omitempty"`
+	ServiceMetadata ServiceMetadata `json:"service_metadata,omitempty"`
+	Tier1LR         string          `json:"tier1_lr,omitempty"`
 }
 
 // PoolRuntime mirrors PoolRuntimeSummary on the bulk inventory. The per-server

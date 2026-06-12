@@ -45,6 +45,58 @@ func ParseMarkers(ms []Marker) MarkerInfo {
 	return mi
 }
 
+// ParseObjectMetadata extracts AKO label data from object markers and fills
+// gaps from service_metadata. Markers win because they are explicit AKO labels;
+// service_metadata is a compatibility fallback for controller endpoints that
+// omit markers from inventory summaries.
+func ParseObjectMetadata(ms []Marker, metadata ServiceMetadata) MarkerInfo {
+	mi := ParseMarkers(ms)
+	return MergeServiceMetadata(mi, metadata)
+}
+
+// MergeServiceMetadata fills empty MarkerInfo fields from service_metadata.
+func MergeServiceMetadata(mi MarkerInfo, metadata ServiceMetadata) MarkerInfo {
+	if mi.Namespace == "" {
+		mi.Namespace = metadata.Namespace
+	}
+	if mi.IngressName == "" {
+		mi.IngressName = metadata.IngressName
+	}
+	if mi.Host == "" && len(metadata.Hostnames) > 0 {
+		mi.Host = metadata.Hostnames[0]
+	}
+	if len(metadata.NamespaceIngressName) > 0 {
+		ns, ing := splitNamespacedName(metadata.NamespaceIngressName[0])
+		if mi.Namespace == "" {
+			mi.Namespace = ns
+		}
+		if mi.IngressName == "" {
+			mi.IngressName = ing
+		}
+	}
+	if len(metadata.NamespaceSvcName) > 0 {
+		ns, svc := splitNamespacedName(metadata.NamespaceSvcName[0])
+		if mi.Namespace == "" {
+			mi.Namespace = ns
+		}
+		if mi.ServiceName == "" {
+			mi.ServiceName = svc
+		}
+	}
+	return mi
+}
+
+func splitNamespacedName(value string) (string, string) {
+	if value == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(value, "/", 2)
+	if len(parts) == 1 {
+		return "", parts[0]
+	}
+	return parts[0], parts[1]
+}
+
 // IsAKOManaged returns true if the object was created by AKO.
 // AKO sets created_by to "ako-<cluster>".
 func IsAKOManaged(createdBy string) bool {

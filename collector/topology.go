@@ -87,7 +87,7 @@ func (e *Exporter) collectTopology(tenant string, vsItems []avi.VSInventoryItem,
 	// VS nodes.
 	for _, vs := range vsItems {
 		nodeID := "vs:" + vs.Config.UUID
-		mi := avi.ParseMarkers(vs.Config.Markers)
+		mi := avi.ParseObjectMetadata(vs.Config.Markers, vs.Config.ServiceMetadata)
 		chain := chainFor(mi, vs.Config.Name)
 
 		state, value, color := stateColor(vs.Runtime.OperStatus.State)
@@ -122,7 +122,7 @@ func (e *Exporter) collectTopology(tenant string, vsItems []avi.VSInventoryItem,
 	// Pool nodes + pool → member edges.
 	for _, p := range poolItems {
 		nodeID := "pool:" + p.Config.UUID
-		mi := avi.ParseMarkers(p.Config.Markers)
+		mi := avi.ParseObjectMetadata(p.Config.Markers, p.Config.ServiceMetadata)
 		chain := chainFor(mi, p.Config.Name)
 
 		state, value, color := stateColor(p.Runtime.OperStatus.State)

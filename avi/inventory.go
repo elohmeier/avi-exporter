@@ -71,14 +71,34 @@ func inventoryExtra() url.Values {
 	return q
 }
 
+func fieldsExtra(fields string) url.Values {
+	q := url.Values{}
+	q.Set("fields", fields)
+	return q
+}
+
 // ListVSInventory returns all VS inventory entries for the given tenant.
 func (c *Client) ListVSInventory(ctx context.Context, tenant string) ([]VSInventoryItem, error) {
 	return listAll[VSInventoryItem](ctx, c, "/api/virtualservice-inventory", tenant, inventoryExtra())
 }
 
+// ListVSConfig returns the VS config fields needed to restore AKO metadata
+// that the inventory endpoint omits on some controller versions.
+func (c *Client) ListVSConfig(ctx context.Context, tenant string) ([]VSConfig, error) {
+	return listAll[VSConfig](ctx, c, "/api/virtualservice", tenant,
+		fieldsExtra("uuid,name,created_by,markers,service_metadata,type,vh_parent_vs_ref,vip,services"))
+}
+
 // ListPoolInventory returns all pool inventory entries for the given tenant.
 func (c *Client) ListPoolInventory(ctx context.Context, tenant string) ([]PoolInventoryItem, error) {
 	return listAll[PoolInventoryItem](ctx, c, "/api/pool-inventory", tenant, inventoryExtra())
+}
+
+// ListPoolConfig returns the pool config fields needed to restore AKO metadata
+// that the inventory endpoint omits on some controller versions.
+func (c *Client) ListPoolConfig(ctx context.Context, tenant string) ([]PoolConfig, error) {
+	return listAll[PoolConfig](ctx, c, "/api/pool", tenant,
+		fieldsExtra("uuid,name,created_by,markers,service_metadata,tier1_lr"))
 }
 
 // ListSEInventory returns all service-engine inventory entries (admin tenant).

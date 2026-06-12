@@ -104,6 +104,127 @@ func TestTenantUpReflectsPoolGroupFailure(t *testing.T) {
 	}
 }
 
+func TestMetadataEnrichmentUsesConfigEndpoints(t *testing.T) {
+	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/virtualservice-inventory":
+			writeJSON(t, w, map[string]any{
+				"count": 1,
+				"results": []map[string]any{
+					{
+						"config": map[string]any{
+							"uuid":    "vs-a",
+							"name":    "vs-a",
+							"enabled": true,
+							"type":    "VS_TYPE_NORMAL",
+						},
+						"runtime":      map[string]any{"oper_status": map[string]any{"state": "OPER_UP"}, "percent_ses_up": 100},
+						"health_score": map[string]any{"health_score": 100},
+					},
+				},
+			})
+		case "/api/virtualservice":
+			writeJSON(t, w, map[string]any{
+				"count": 1,
+				"results": []map[string]any{
+					{
+						"uuid":       "vs-a",
+						"name":       "vs-a",
+						"created_by": "ako-cluster-a",
+						"markers": []map[string]any{
+							{"key": "Namespace", "values": []string{"team-a"}},
+						},
+						"service_metadata": map[string]any{
+							"namespace_svc_name": []string{"team-a/svc-a"},
+							"ingress_name":       "ing-a",
+							"hostnames":          []string{"app.example.com"},
+						},
+					},
+				},
+			})
+		case "/api/pool-inventory":
+			writeJSON(t, w, map[string]any{
+				"count": 1,
+				"results": []map[string]any{
+					{
+						"config": map[string]any{
+							"uuid":    "pool-a",
+							"name":    "pool-a",
+							"enabled": true,
+						},
+						"runtime": map[string]any{
+							"oper_status":                map[string]any{"state": "OPER_UP"},
+							"num_servers":                1,
+							"num_servers_up":             1,
+							"num_servers_enabled":        1,
+							"percent_servers_up_enabled": 100,
+							"percent_servers_up_total":   100,
+						},
+						"health_score": map[string]any{"health_score": 100},
+					},
+				},
+			})
+		case "/api/pool":
+			writeJSON(t, w, map[string]any{
+				"count": 1,
+				"results": []map[string]any{
+					{
+						"uuid":       "pool-a",
+						"name":       "pool-a",
+						"created_by": "ako-cluster-a",
+						"markers": []map[string]any{
+							{"key": "Namespace", "values": []string{"team-b"}},
+							{"key": "ServiceName", "values": []string{"svc-b"}},
+						},
+						"service_metadata": map[string]any{
+							"ingress_name": "ing-b",
+							"hostnames":    []string{"api.example.com"},
+						},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer controller.Close()
+
+	cfg := testConfig([]string{"tenant-a"}, []string{
+		"cluster", "controller_metrics",
+		"se_inventory", "se_metrics",
+		"vs_metrics",
+		"pool_metrics", "pool_members",
+		"vsvip", "pool_group", "gslb", "topology",
+	})
+	mfs := gatherExporter(t, cfg, controller.URL, 1)
+
+	vsOperUp := metricFamily(t, mfs, "avi_vs_oper_up")
+	if got := metricValueForLabels(t, vsOperUp, map[string]string{
+		"tenant":    "tenant-a",
+		"vs_uuid":   "vs-a",
+		"namespace": "team-a",
+		"service":   "svc-a",
+		"ingress":   "ing-a",
+		"host":      "app.example.com",
+		"ako":       "true",
+	}); got != 1 {
+		t.Fatalf("enriched VS oper up = %v, want 1", got)
+	}
+
+	poolOperUp := metricFamily(t, mfs, "avi_pool_oper_up")
+	if got := metricValueForLabels(t, poolOperUp, map[string]string{
+		"tenant":    "tenant-a",
+		"pool_uuid": "pool-a",
+		"namespace": "team-b",
+		"service":   "svc-b",
+		"ingress":   "ing-b",
+		"host":      "api.example.com",
+		"ako":       "true",
+	}); got != 1 {
+		t.Fatalf("enriched pool oper up = %v, want 1", got)
+	}
+}
+
 func TestControllerMetricsRenderFromAnalytics(t *testing.T) {
 	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/analytics/metrics/collection" {

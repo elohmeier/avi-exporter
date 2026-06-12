@@ -466,7 +466,7 @@ func (e *Exporter) refreshTenant(ctx context.Context, tenant string) error {
 			if err != nil {
 				return err
 			}
-			vsItems = items
+			vsItems = e.enrichVSInventory(ctx, tenant, items)
 			vsListOK = true
 			return nil
 		}))
@@ -496,7 +496,7 @@ func (e *Exporter) refreshTenant(ctx context.Context, tenant string) error {
 			if err != nil {
 				return err
 			}
-			poolItems = items
+			poolItems = e.enrichPoolInventory(ctx, tenant, items)
 			poolListOK = true
 			return nil
 		}))

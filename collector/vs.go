@@ -13,7 +13,7 @@ import (
 // vsLabelValues returns the label values for a VS, in the same order as vsLbl
 // in exporter.go: base..., tenant, vs, vs_uuid, namespace, service, ingress, host, ako.
 func (e *Exporter) vsLabelValues(tenant string, item avi.VSInventoryItem) []string {
-	mi := avi.ParseMarkers(item.Config.Markers)
+	mi := avi.ParseObjectMetadata(item.Config.Markers, item.Config.ServiceMetadata)
 	ako := "false"
 	if avi.IsAKOManaged(item.Config.CreatedBy) {
 		ako = "true"

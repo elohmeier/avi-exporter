@@ -526,9 +526,25 @@ func TestInventoryWrappers(t *testing.T) {
 		case "/api/virtualservice-inventory":
 			requireInventoryQuery(t, r)
 			_, _ = w.Write([]byte(`{"results":[{"config":{"uuid":"vs-1","name":"vs-1"},"runtime":{"oper_status":{"state":"OPER_UP"}}}]}`))
+		case "/api/virtualservice":
+			if got := r.Header.Get("X-Avi-Tenant"); got != "tenant-a" {
+				t.Fatalf("VS config tenant = %q", got)
+			}
+			if got := r.URL.Query().Get("fields"); !strings.Contains(got, "service_metadata") {
+				t.Fatalf("VS config fields = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"results":[{"uuid":"vs-1","name":"vs-1","service_metadata":"{\"namespace\":\"team-a\",\"hostnames\":[\"app.example.com\"]}"}]}`))
 		case "/api/pool-inventory":
 			requireInventoryQuery(t, r)
 			_, _ = w.Write([]byte(`{"results":[{"config":{"uuid":"pool-1","name":"pool-1"},"runtime":{"oper_status":{"state":"OPER_UP"}}}]}`))
+		case "/api/pool":
+			if got := r.Header.Get("X-Avi-Tenant"); got != "tenant-a" {
+				t.Fatalf("pool config tenant = %q", got)
+			}
+			if got := r.URL.Query().Get("fields"); !strings.Contains(got, "service_metadata") {
+				t.Fatalf("pool config fields = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"results":[{"uuid":"pool-1","name":"pool-1","service_metadata":{"namespace":"team-a","ingress_name":"ing-a"}}]}`))
 		case "/api/serviceengine-inventory":
 			requireInventoryQuery(t, r)
 			if got := r.Header.Get("X-Avi-Tenant"); got != "admin" {
@@ -586,8 +602,14 @@ func TestInventoryWrappers(t *testing.T) {
 	if items, err := client.ListVSInventory(context.Background(), "tenant-a"); err != nil || len(items) != 1 {
 		t.Fatalf("ListVSInventory = %d, %v", len(items), err)
 	}
+	if items, err := client.ListVSConfig(context.Background(), "tenant-a"); err != nil || len(items) != 1 || items[0].ServiceMetadata.Namespace != "team-a" {
+		t.Fatalf("ListVSConfig = %#v, %v", items, err)
+	}
 	if items, err := client.ListPoolInventory(context.Background(), "tenant-a"); err != nil || len(items) != 1 {
 		t.Fatalf("ListPoolInventory = %d, %v", len(items), err)
+	}
+	if items, err := client.ListPoolConfig(context.Background(), "tenant-a"); err != nil || len(items) != 1 || items[0].ServiceMetadata.IngressName != "ing-a" {
+		t.Fatalf("ListPoolConfig = %#v, %v", items, err)
 	}
 	if items, err := client.ListSEInventory(context.Background()); err != nil || len(items) != 1 {
 		t.Fatalf("ListSEInventory = %d, %v", len(items), err)
@@ -725,5 +747,25 @@ func TestMarkersAndRefUUID(t *testing.T) {
 		if got := RefUUID(input); got != want {
 			t.Fatalf("RefUUID(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestObjectMetadataFallbacks(t *testing.T) {
+	var fromString ServiceMetadata
+	if err := json.Unmarshal([]byte(`"{\"namespace\":\"team-a\",\"namespace_ingress_name\":[\"team-a/ing-a\"],\"hostnames\":[\"app.example.com\"]}"`), &fromString); err != nil {
+		t.Fatalf("unmarshal string service_metadata: %v", err)
+	}
+	info := ParseObjectMetadata(nil, fromString)
+	if info.Namespace != "team-a" || info.IngressName != "ing-a" || info.Host != "app.example.com" {
+		t.Fatalf("metadata info = %#v", info)
+	}
+
+	var fromObject ServiceMetadata
+	if err := json.Unmarshal([]byte(`{"namespace_svc_name":["team-b/svc-b"],"hostnames":"api.example.com"}`), &fromObject); err != nil {
+		t.Fatalf("unmarshal object service_metadata: %v", err)
+	}
+	info = ParseObjectMetadata([]Marker{{Key: "Namespace", Values: []string{"marker-ns"}}}, fromObject)
+	if info.Namespace != "marker-ns" || info.ServiceName != "svc-b" || info.Host != "api.example.com" {
+		t.Fatalf("merged metadata info = %#v", info)
 	}
 }

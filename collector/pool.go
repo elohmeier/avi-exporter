@@ -20,7 +20,7 @@ type poolMemberSnapshot struct {
 
 // poolLabelValues returns the label values for a pool, in poolLbl order.
 func (e *Exporter) poolLabelValues(tenant string, item avi.PoolInventoryItem) []string {
-	mi := avi.ParseMarkers(item.Config.Markers)
+	mi := avi.ParseObjectMetadata(item.Config.Markers, item.Config.ServiceMetadata)
 	ako := "false"
 	if avi.IsAKOManaged(item.Config.CreatedBy) {
 		ako = "true"
@@ -152,7 +152,7 @@ func (e *Exporter) renderPoolMemberTopology(tenant string, members []poolMemberS
 		pool := member.Pool
 		server := member.Server
 		poolNodeID := "pool:" + pool.Config.UUID
-		mi := avi.ParseMarkers(pool.Config.Markers)
+		mi := avi.ParseObjectMetadata(pool.Config.Markers, pool.Config.ServiceMetadata)
 		chain := chainFor(mi, pool.Config.Name)
 
 		memberID := "poolmember:" + server.IPAddr.Addr + ":" + strconv.Itoa(server.Port)
