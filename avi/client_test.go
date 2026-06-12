@@ -768,4 +768,13 @@ func TestObjectMetadataFallbacks(t *testing.T) {
 	if info.Namespace != "marker-ns" || info.ServiceName != "svc-b" || info.Host != "api.example.com" {
 		t.Fatalf("merged metadata info = %#v", info)
 	}
+
+	var withObjectField ServiceMetadata
+	if err := json.Unmarshal([]byte(`"{\"namespace_svc_name\":[\"team-c/svc-c\"],\"host_namespace_ingress_name\":{\"app.example.com\":\"team-c/ing-c\"}}"`), &withObjectField); err != nil {
+		t.Fatalf("unmarshal object host_namespace_ingress_name: %v", err)
+	}
+	info = ParseObjectMetadata(nil, withObjectField)
+	if info.Namespace != "team-c" || info.ServiceName != "svc-c" {
+		t.Fatalf("metadata with object field info = %#v", info)
+	}
 }

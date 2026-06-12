@@ -2,6 +2,7 @@ package avi
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -123,12 +124,37 @@ func (l *flexStringList) UnmarshalJSON(b []byte) error {
 		*l = []string{s}
 		return nil
 	}
-	var values []string
-	if err := json.Unmarshal(b, &values); err != nil {
+	var value any
+	if err := json.Unmarshal(b, &value); err != nil {
 		return err
 	}
+	values := flattenStrings(value)
+	sort.Strings(values)
 	*l = values
 	return nil
+}
+
+func flattenStrings(value any) []string {
+	var out []string
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			if x != "" {
+				out = append(out, x)
+			}
+		case []any:
+			for _, item := range x {
+				walk(item)
+			}
+		case map[string]any:
+			for _, item := range x {
+				walk(item)
+			}
+		}
+	}
+	walk(value)
+	return out
 }
 
 // PageResp is the generic collection envelope (`{count,next,previous,results}`).
