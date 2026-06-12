@@ -192,43 +192,44 @@ func (e *Exporter) appendPoolMemberLabels(poolBase []string, ip, port string) []
 }
 
 var poolMetricIDs = []string{
+	"l4_server.apdexc",
 	"l4_server.avg_bandwidth",
 	"l4_server.avg_complete_conns",
-	"l4_server.avg_open_conns",
-	"l4_server.avg_total_rtt",
-	"l7_server.avg_resp_latency",
-	"l7_server.avg_error_responses",
+	"l4_server.avg_errored_connections",
 	"l4_server.avg_health_status",
+	"l4_server.avg_new_established_conns",
+	"l4_server.avg_open_conns",
+	"l4_server.avg_pool_complete_conns",
+	"l4_server.avg_pool_open_conns",
+	"l4_server.avg_rx_bytes",
+	"l4_server.avg_rx_pkts",
+	"l4_server.avg_total_rtt",
+	"l4_server.avg_tx_bytes",
+	"l4_server.avg_tx_pkts",
 	"l4_server.avg_uptime",
+	"l4_server.max_open_conns",
+	"l7_server.apdexr",
+	"l7_server.avg_application_response_time",
+	"l7_server.avg_complete_responses",
+	"l7_server.avg_error_responses",
+	"l7_server.avg_frustrated_responses",
+	"l7_server.avg_resp_4xx",
+	"l7_server.avg_resp_5xx",
+	"l7_server.avg_resp_latency",
+	"l7_server.avg_total_requests",
+	"l7_server.pct_response_errors",
+	"healthscore.health_score_value",
 }
 
 func (e *Exporter) collectPoolAnalytics(ctx context.Context, tenant string, items []avi.PoolInventoryItem, ch chan<- prometheus.Metric) error {
-	// Pool metrics ride on the VSERVER_METRICS_ENTITY namespace, scoped by
-	// pool_uuid. The current shape passes the pool UUID as entity_uuid AND
-	// as pool_uuid. Different controllers key the response map differently
-	// (by pool UUID per the request, or by VS UUID for the VS that holds
-	// the pool); the join below tolerates both via header.EntityUUID lookup.
-	queries := make([]avi.MetricQuery, 0, len(poolMetricIDs)*len(items))
-	for _, it := range items {
-		for _, id := range poolMetricIDs {
-			queries = append(queries, avi.MetricQuery{
-				EntityUUID:   it.Config.UUID,
-				MetricEntity: avi.EntityVS,
-				PoolUUID:     it.Config.UUID,
-				MetricID:     id,
-				Step:         e.cfg.MetricsStep,
-				Limit:        e.cfg.MetricsLimit,
-			})
-		}
-	}
-	if len(queries) == 0 {
+	if len(items) == 0 {
 		e.cacheMu.Lock()
 		deleteTenantGaugeVecs(tenant, e.poolAnalyticsGaugeVecs()...)
 		e.cacheMu.Unlock()
 		return nil
 	}
 
-	resp, err := e.client.CollectMetrics(ctx, tenant, avi.MetricsCollectionRequest{MetricRequests: queries})
+	families, err := e.collectBuiltinPrometheusMetrics(ctx, "pool", []string{tenant}, poolMetricIDs)
 	if err != nil {
 		e.logger.Error("collect pool metrics", "tenant", tenant, "err", err)
 		return fmt.Errorf("%w: %v", errAnalyticsFailed, err)
@@ -243,34 +244,30 @@ func (e *Exporter) collectPoolAnalytics(ctx context.Context, tenant string, item
 	defer e.cacheMu.Unlock()
 	deleteTenantGaugeVecs(tenant, e.poolAnalyticsGaugeVecs()...)
 
-	// Join by response-map key first, falling back to header.entity_uuid
-	// so controllers that key by VS UUID still match through the
-	// pool_uuid-bearing header (when present).
 	totalSeries := 0
 	matched := 0
-	for key, series := range resp.Series {
-		for _, s := range series {
+	for familyName, family := range families {
+		g := e.poolGaugeFor(familyName)
+		if g == nil {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
 			totalSeries++
-			it, ok := byUUID[key]
-			if !ok {
-				it, ok = byUUID[s.Header.EntityUUID]
-			}
+			it, ok := byUUID[prometheusLabelValue(metric, "uuid")]
 			if !ok {
 				continue
 			}
 			matched++
-			v, ok := s.Last()
+			value, ok := prometheusMetricValue(metric)
 			if !ok {
 				continue
 			}
-			if g := e.poolGaugeFor(s.Header.Name); g != nil {
-				g.WithLabelValues(e.poolLabelValues(tenant, it)...).Set(v)
-			}
+			g.WithLabelValues(e.poolLabelValues(tenant, it)...).Set(value)
 		}
 	}
 	if totalSeries == 0 {
 		e.logger.Debug("pool analytics returned zero series — controller may reject this query shape",
-			"tenant", tenant, "queries", len(queries))
+			"tenant", tenant, "metrics", len(poolMetricIDs))
 	} else if matched == 0 {
 		e.logger.Debug("pool analytics returned series but none matched known pool UUIDs",
 			"tenant", tenant, "series", totalSeries)
@@ -280,23 +277,5 @@ func (e *Exporter) collectPoolAnalytics(ctx context.Context, tenant string, item
 }
 
 func (e *Exporter) poolGaugeFor(metricID string) *prometheus.GaugeVec {
-	switch metricID {
-	case "l4_server.avg_bandwidth":
-		return e.poolAvgBandwidth
-	case "l4_server.avg_complete_conns":
-		return e.poolAvgCompleteConns
-	case "l4_server.avg_open_conns":
-		return e.poolAvgOpenConns
-	case "l4_server.avg_total_rtt":
-		return e.poolAvgTotalRTT
-	case "l7_server.avg_resp_latency":
-		return e.poolAvgRespLatency
-	case "l7_server.avg_error_responses":
-		return e.poolAvgErrorResp
-	case "l4_server.avg_health_status":
-		return e.poolAvgHealthStatus
-	case "l4_server.avg_uptime":
-		return e.poolAvgUptime
-	}
-	return nil
+	return e.poolAnalyticsGauges[metricID]
 }

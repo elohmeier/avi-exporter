@@ -478,20 +478,9 @@ func TestSuccessfulEmptyPoolAnalyticsClearsStaleSeries(t *testing.T) {
 				return
 			}
 			writePoolInventory(t, w)
-		case "/api/analytics/metrics/collection":
-			writeJSON(t, w, map[string]any{
-				"series": map[string]any{
-					"pool-a": []map[string]any{
-						{
-							"header": map[string]any{
-								"name":        "l4_server.avg_bandwidth",
-								"entity_uuid": "pool-a",
-							},
-							"data": []map[string]any{{"timestamp": "2026-01-01T00:00:00Z", "value": 123.0}},
-						},
-					},
-				},
-			})
+		case "/api/analytics/prometheus-metrics/pool":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = fmt.Fprintln(w, `avi_l4_server_avg_bandwidth{uuid="pool-a",type="pool",tenant="admin",name="pool-a"} 123`)
 		default:
 			http.NotFound(w, r)
 		}

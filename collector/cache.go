@@ -901,11 +901,7 @@ func (e *Exporter) controllerMetricsGaugeVecs() []*prometheus.GaugeVec {
 }
 
 func (e *Exporter) vsAnalyticsGaugeVecs() []*prometheus.GaugeVec {
-	return []*prometheus.GaugeVec{
-		e.vsAvgBandwidth, e.vsAvgCompleteConns, e.vsAvgNewEstabConns, e.vsMaxOpenConns, e.vsConnectionsDropped,
-		e.vsAvgTotalRequests, e.vsAvgCompleteResp, e.vsAvgErrorResp, e.vsAvgResp2xx, e.vsAvgResp4xx, e.vsAvgResp5xx,
-		e.vsApdexR, e.vsAvgClientRTT, e.vsAvgRespLatency,
-	}
+	return sortedUniqueGaugeVecs(e.vsAnalyticsGauges)
 }
 
 func (e *Exporter) poolInventoryGaugeVecs() []*prometheus.GaugeVec {
@@ -922,10 +918,7 @@ func (e *Exporter) poolMemberGaugeVecs() []*prometheus.GaugeVec {
 }
 
 func (e *Exporter) poolAnalyticsGaugeVecs() []*prometheus.GaugeVec {
-	return []*prometheus.GaugeVec{
-		e.poolAvgBandwidth, e.poolAvgCompleteConns, e.poolAvgOpenConns, e.poolAvgTotalRTT,
-		e.poolAvgRespLatency, e.poolAvgErrorResp, e.poolAvgHealthStatus, e.poolAvgUptime,
-	}
+	return sortedUniqueGaugeVecs(e.poolAnalyticsGauges)
 }
 
 func (e *Exporter) poolGroupGaugeVecs() []*prometheus.GaugeVec {
@@ -948,11 +941,7 @@ func (e *Exporter) seInventoryGaugeVecs() []*prometheus.GaugeVec {
 }
 
 func (e *Exporter) seAnalyticsGaugeVecs() []*prometheus.GaugeVec {
-	return []*prometheus.GaugeVec{
-		e.seAvgCPUUsage, e.seAvgMemUsage, e.seAvgDiskUsage, e.seAvgConnections, e.seAvgConnDropped,
-		e.seAvgRxBytes, e.seAvgTxBytes, e.seAvgBandwidth, e.seAvgConnMem, e.sePctConnDropped,
-		e.sePktBufUsage, e.sePersistTblUsage, e.seSslSessCache,
-	}
+	return sortedUniqueGaugeVecs(e.seAnalyticsGauges)
 }
 
 func (e *Exporter) vsvipGaugeVecs() []*prometheus.GaugeVec {

@@ -24,6 +24,10 @@ func TestFullRefreshCoversAllModules(t *testing.T) {
 			writeFullAnalytics(t, w, r)
 		case "/api/analytics/prometheus-metrics/serviceengine":
 			writeFullSEPrometheusMetrics(t, w)
+		case "/api/analytics/prometheus-metrics/virtualservice":
+			writeFullVSPrometheusMetrics(t, w)
+		case "/api/analytics/prometheus-metrics/pool":
+			writeFullPoolPrometheusMetrics(t, w)
 		case "/api/serviceengine-inventory":
 			writeFullSEInventory(t, w)
 		case "/api/virtualservice-inventory":
@@ -221,6 +225,22 @@ func writeFullSEPrometheusMetrics(t *testing.T, w http.ResponseWriter) {
 	_, _ = fmt.Fprintln(w, "# Successfully gathered 2 metrics for serviceengine")
 	_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-a",type="serviceengine",tenant="admin",name="se-a"} 12`)
 	_, _ = fmt.Fprintln(w, `avi_se_stats_avg_mem_usage{uuid="se-a",type="serviceengine",tenant="admin",name="se-a"} 34`)
+}
+
+func writeFullVSPrometheusMetrics(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = fmt.Fprintln(w, "# Successfully gathered 2 metrics for virtualservice")
+	_, _ = fmt.Fprintln(w, `avi_l4_client_avg_bandwidth{uuid="vs-a",type="virtualservice",tenant="admin",name="vs-a"} 123`)
+	_, _ = fmt.Fprintln(w, `avi_dns_client_avg_complete_queries{uuid="vs-a",type="virtualservice",tenant="admin",name="vs-a"} 456`)
+}
+
+func writeFullPoolPrometheusMetrics(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = fmt.Fprintln(w, "# Successfully gathered 2 metrics for pool")
+	_, _ = fmt.Fprintln(w, `avi_l4_server_avg_bandwidth{uuid="pool-a",type="pool",tenant="admin",name="pool-a"} 789`)
+	_, _ = fmt.Fprintln(w, `avi_l7_server_avg_resp_5xx{uuid="pool-a",type="pool",tenant="admin",name="pool-a"} 3`)
 }
 
 func writeFullVSInventory(t *testing.T, w http.ResponseWriter) {

@@ -98,6 +98,7 @@ type Exporter struct {
 	vsApdexR             *prometheus.GaugeVec
 	vsAvgClientRTT       *prometheus.GaugeVec
 	vsAvgRespLatency     *prometheus.GaugeVec
+	vsAnalyticsGauges    map[string]*prometheus.GaugeVec
 
 	// --- Pool inventory ---
 	poolOperUp                  *prometheus.GaugeVec
@@ -125,6 +126,7 @@ type Exporter struct {
 	poolAvgErrorResp     *prometheus.GaugeVec
 	poolAvgHealthStatus  *prometheus.GaugeVec
 	poolAvgUptime        *prometheus.GaugeVec
+	poolAnalyticsGauges  map[string]*prometheus.GaugeVec
 
 	// --- Pool Group ---
 	poolGroupInfo        *prometheus.GaugeVec
@@ -168,6 +170,7 @@ type Exporter struct {
 	sePktBufUsage     *prometheus.GaugeVec
 	sePersistTblUsage *prometheus.GaugeVec
 	seSslSessCache    *prometheus.GaugeVec
+	seAnalyticsGauges map[string]*prometheus.GaugeVec
 
 	// --- VIP / VsVip inventory ---
 	vipOperUp          *prometheus.GaugeVec
@@ -240,7 +243,7 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		return append(append([]string{}, lbl...), extra)
 	}
 
-	return &Exporter{
+	e := &Exporter{
 		cfg:             cfg,
 		url:             url,
 		parallelism:     parallelism,
@@ -403,7 +406,51 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		topologyNodeHealth:        g("topology_node_health", "Topology node health (0-100)", topoNodeStatsLbl),
 		topologyNodeRequestsTotal: g("topology_node_requests_total", "Topology node total request rate", topoNodeStatsLbl),
 		topologyNodeConnections:   g("topology_node_connections", "Topology node connection count", topoNodeStatsLbl),
-	}, nil
+	}
+
+	e.vsAnalyticsGauges = buildAnalyticsGaugeMap(g, "vs", vsLbl, vsMetricIDs, map[string]*prometheus.GaugeVec{
+		"l4_client.avg_bandwidth":             e.vsAvgBandwidth,
+		"l4_client.avg_complete_conns":        e.vsAvgCompleteConns,
+		"l4_client.avg_new_established_conns": e.vsAvgNewEstabConns,
+		"l4_client.max_open_conns":            e.vsMaxOpenConns,
+		"l4_client.avg_connections_dropped":   e.vsConnectionsDropped,
+		"l7_client.avg_total_requests":        e.vsAvgTotalRequests,
+		"l7_client.avg_complete_responses":    e.vsAvgCompleteResp,
+		"l7_client.avg_error_responses":       e.vsAvgErrorResp,
+		"l7_client.avg_resp_2xx":              e.vsAvgResp2xx,
+		"l7_client.avg_resp_4xx":              e.vsAvgResp4xx,
+		"l7_client.avg_resp_5xx":              e.vsAvgResp5xx,
+		"l7_client.apdexr":                    e.vsApdexR,
+		"l7_client.avg_client_rtt":            e.vsAvgClientRTT,
+		"l7_server.avg_resp_latency":          e.vsAvgRespLatency,
+	})
+	e.poolAnalyticsGauges = buildAnalyticsGaugeMap(g, "pool", poolLbl, poolMetricIDs, map[string]*prometheus.GaugeVec{
+		"l4_server.avg_bandwidth":       e.poolAvgBandwidth,
+		"l4_server.avg_complete_conns":  e.poolAvgCompleteConns,
+		"l4_server.avg_open_conns":      e.poolAvgOpenConns,
+		"l4_server.avg_total_rtt":       e.poolAvgTotalRTT,
+		"l7_server.avg_resp_latency":    e.poolAvgRespLatency,
+		"l7_server.avg_error_responses": e.poolAvgErrorResp,
+		"l4_server.avg_health_status":   e.poolAvgHealthStatus,
+		"l4_server.avg_uptime":          e.poolAvgUptime,
+	})
+	e.seAnalyticsGauges = buildAnalyticsGaugeMap(g, "", seLbl, seMetricIDs, map[string]*prometheus.GaugeVec{
+		"se_stats.avg_cpu_usage":               e.seAvgCPUUsage,
+		"se_stats.avg_mem_usage":               e.seAvgMemUsage,
+		"se_stats.avg_disk1_usage":             e.seAvgDiskUsage,
+		"se_stats.avg_connections":             e.seAvgConnections,
+		"se_stats.avg_connections_dropped":     e.seAvgConnDropped,
+		"se_if.avg_rx_bytes":                   e.seAvgRxBytes,
+		"se_if.avg_tx_bytes":                   e.seAvgTxBytes,
+		"se_if.avg_bandwidth":                  e.seAvgBandwidth,
+		"se_stats.avg_connection_mem_usage":    e.seAvgConnMem,
+		"se_stats.pct_connections_dropped":     e.sePctConnDropped,
+		"se_stats.avg_packet_buffer_usage":     e.sePktBufUsage,
+		"se_stats.avg_persistent_table_usage":  e.sePersistTblUsage,
+		"se_stats.avg_ssl_session_cache_usage": e.seSslSessCache,
+	})
+
+	return e, nil
 }
 
 // Describe implements prometheus.Collector.
@@ -435,36 +482,32 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // allGaugeVecs lists every GaugeVec the exporter owns. Used for Describe and
 // Reset loops so adding a new metric doesn't require updating three lists.
 func (e *Exporter) allGaugeVecs() []*prometheus.GaugeVec {
-	return []*prometheus.GaugeVec{
+	out := []*prometheus.GaugeVec{
 		e.clusterStateInfo, e.clusterNodeUp, e.clusterNodeRole,
 		e.controllerAvgCPUUsage, e.controllerAvgMemUsage, e.controllerAvgDiskUsage,
 		e.controllerAvgDiskReadBytes, e.controllerAvgDiskWriteBytes,
 		e.controllerAvgNumActiveVS, e.controllerAvgNumBackendServers,
 		e.vsOperUp, e.vsOperStatusInfo, e.vsEnabled, e.vsHealthScore, e.vsPercentSesUp, e.vsTypeInfo, e.vsAlertLevel,
 		e.vsVipOperUp, e.vsVipPercentSesUp, e.vsVipNumSeAssigned, e.vsVipNumSeRequested, e.vsVipOperStatusInfo,
-		e.vsAvgBandwidth, e.vsAvgCompleteConns, e.vsAvgNewEstabConns, e.vsMaxOpenConns, e.vsConnectionsDropped,
-		e.vsAvgTotalRequests, e.vsAvgCompleteResp, e.vsAvgErrorResp, e.vsAvgResp2xx, e.vsAvgResp4xx, e.vsAvgResp5xx,
-		e.vsApdexR, e.vsAvgClientRTT, e.vsAvgRespLatency,
 		e.poolOperUp, e.poolOperStatusInfo, e.poolEnabled, e.poolHealthScore,
 		e.poolNumServers, e.poolNumServersUp, e.poolNumServersEnabled,
 		e.poolPercentServersUpEnabled, e.poolPercentServersUpTotal,
 		e.poolAlertLevel, e.poolAppProfileType,
 		e.poolMemberOperUp, e.poolMemberOperStatusInfo,
-		e.poolAvgBandwidth, e.poolAvgCompleteConns, e.poolAvgOpenConns, e.poolAvgTotalRTT,
-		e.poolAvgRespLatency, e.poolAvgErrorResp, e.poolAvgHealthStatus, e.poolAvgUptime,
 		e.poolGroupInfo, e.poolGroupMemberCount,
 		e.gslbServiceOperUp, e.gslbServiceOperStatusInfo, e.gslbServiceEnabled, e.gslbServiceMemberCount, e.gslbServiceDomainsInfo,
 		e.seOperUp, e.seOperStatusInfo, e.seEnabled, e.seHealthScore,
 		e.seConnected, e.seBgpPeersUp, e.seGatewayUp, e.seAtCurrVer, e.seSufficientMem, e.seLicensedCores,
 		e.seLicenseState, e.sePowerState, e.seMigrateState, e.seVersionInfo, e.seEnableStateInfo,
-		e.seAvgCPUUsage, e.seAvgMemUsage, e.seAvgDiskUsage, e.seAvgConnections, e.seAvgConnDropped,
-		e.seAvgRxBytes, e.seAvgTxBytes, e.seAvgBandwidth, e.seAvgConnMem, e.sePctConnDropped,
-		e.sePktBufUsage, e.sePersistTblUsage, e.seSslSessCache,
 		e.vipOperUp, e.vipOperStatusInfo, e.vipEnabled, e.vipPercentSesUp, e.vipNumSeAssigned, e.vipNumSeRequested,
 		e.vipActiveOnSe, e.vipSharedByVsCount, e.vipFloatingIP, e.vipAutoAllocated, e.vipDNSRecord,
 		e.topologyNode, e.topologyEdge, e.topologyNodeState, e.topologyNodeHealth,
 		e.topologyNodeRequestsTotal, e.topologyNodeConnections,
 	}
+	out = append(out, sortedUniqueGaugeVecs(e.vsAnalyticsGauges)...)
+	out = append(out, sortedUniqueGaugeVecs(e.poolAnalyticsGauges)...)
+	out = append(out, sortedUniqueGaugeVecs(e.seAnalyticsGauges)...)
+	return out
 }
 
 // buildBaseLabels returns the cached base label values.

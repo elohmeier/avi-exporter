@@ -309,8 +309,8 @@ func TestGetRaw(t *testing.T) {
 		case "/login":
 			writeLoginCookies(w, "csrf", "session")
 		case "/api/plain":
-			if got := r.Header.Get("Accept"); got != "text/plain" {
-				t.Fatalf("Accept = %q, want text/plain", got)
+			if got := r.Header.Get("Accept"); got != "application/json, */*;q=0.5" {
+				t.Fatalf("Accept = %q, want broad raw-response accept", got)
 			}
 			if got := r.URL.Query().Get("tenant"); got != "admin,tenant-a" {
 				t.Fatalf("tenant query = %q", got)

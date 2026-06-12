@@ -57,40 +57,41 @@ func (e *Exporter) collectSEInventory(ctx context.Context, items []avi.SEInvento
 }
 
 var seMetricIDs = []string{
-	"se_stats.avg_cpu_usage",
-	"se_stats.avg_mem_usage",
-	"se_stats.avg_disk1_usage",
+	"se_if.avg_bandwidth",
+	"se_if.avg_connection_table_usage",
+	"se_if.avg_rx_bytes",
+	"se_if.avg_rx_pkts",
+	"se_if.avg_rx_pkts_dropped_non_vs",
+	"se_if.avg_tx_bytes",
+	"se_if.avg_tx_pkts",
+	"se_stats.avg_connection_mem_usage",
 	"se_stats.avg_connections",
 	"se_stats.avg_connections_dropped",
-	"se_stats.avg_connection_mem_usage",
-	"se_stats.pct_connections_dropped",
+	"se_stats.avg_cpu_usage",
+	"se_stats.avg_disk1_usage",
+	"se_stats.avg_dynamic_mem_usage",
+	"se_stats.avg_mem_usage",
+	"se_stats.avg_packet_buffer_header_usage",
+	"se_stats.avg_packet_buffer_large_usage",
+	"se_stats.avg_packet_buffer_small_usage",
 	"se_stats.avg_packet_buffer_usage",
 	"se_stats.avg_persistent_table_usage",
+	"se_stats.avg_rx_bandwidth",
 	"se_stats.avg_ssl_session_cache_usage",
-	"se_if.avg_rx_bytes",
-	"se_if.avg_tx_bytes",
-	"se_if.avg_bandwidth",
+	"se_stats.max_se_bandwidth",
+	"se_stats.pct_connections_dropped",
+	"se_stats.pct_syn_cache_usage",
+	"healthscore.health_score_value",
 }
 
 func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInventoryItem, ch chan<- prometheus.Metric) error {
 	_ = items
 	_ = ch
 
-	query := url.Values{}
-	query.Set("tenant", strings.Join(e.seMetricTenants(), ","))
-	query.Set("metric_id", strings.Join(seMetricIDs, ","))
-
-	raw, err := e.client.GetRaw(ctx, "/api/analytics/prometheus-metrics/serviceengine", avi.RequestOptions{Query: query})
+	families, err := e.collectBuiltinPrometheusMetrics(ctx, "serviceengine", e.seMetricTenants(), seMetricIDs)
 	if err != nil {
 		e.logger.Error("collect SE metrics", "err", err)
 		return fmt.Errorf("%w: %v", errAnalyticsFailed, err)
-	}
-
-	parser := expfmt.TextParser{}
-	families, err := parser.TextToMetricFamilies(bytes.NewReader(raw))
-	if err != nil {
-		e.logger.Error("parse SE metrics", "err", err)
-		return fmt.Errorf("%w: parse serviceengine prometheus metrics: %v", errAnalyticsFailed, err)
 	}
 
 	e.cacheMu.Lock()
@@ -120,6 +121,24 @@ func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInvento
 	}
 
 	return nil
+}
+
+func (e *Exporter) collectBuiltinPrometheusMetrics(ctx context.Context, resource string, tenants []string, metricIDs []string) (map[string]*dto.MetricFamily, error) {
+	query := url.Values{}
+	query.Set("tenant", strings.Join(tenants, ","))
+	query.Set("metric_id", strings.Join(metricIDs, ","))
+
+	raw, err := e.client.GetRaw(ctx, "/api/analytics/prometheus-metrics/"+resource, avi.RequestOptions{Query: query})
+	if err != nil {
+		return nil, err
+	}
+
+	parser := expfmt.TextParser{}
+	families, err := parser.TextToMetricFamilies(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s prometheus metrics: %w", resource, err)
+	}
+	return families, nil
 }
 
 func (e *Exporter) seMetricTenants() []string {
@@ -170,33 +189,5 @@ func prometheusMetricValue(metric *dto.Metric) (float64, bool) {
 }
 
 func (e *Exporter) seGaugeFor(metricID string) *prometheus.GaugeVec {
-	switch metricID {
-	case "se_stats.avg_cpu_usage", "avi_se_stats_avg_cpu_usage":
-		return e.seAvgCPUUsage
-	case "se_stats.avg_mem_usage", "avi_se_stats_avg_mem_usage":
-		return e.seAvgMemUsage
-	case "se_stats.avg_disk1_usage", "avi_se_stats_avg_disk1_usage":
-		return e.seAvgDiskUsage
-	case "se_stats.avg_connections", "avi_se_stats_avg_connections":
-		return e.seAvgConnections
-	case "se_stats.avg_connections_dropped", "avi_se_stats_avg_connections_dropped":
-		return e.seAvgConnDropped
-	case "se_if.avg_rx_bytes", "avi_se_if_avg_rx_bytes":
-		return e.seAvgRxBytes
-	case "se_if.avg_tx_bytes", "avi_se_if_avg_tx_bytes":
-		return e.seAvgTxBytes
-	case "se_if.avg_bandwidth", "avi_se_if_avg_bandwidth":
-		return e.seAvgBandwidth
-	case "se_stats.avg_connection_mem_usage", "avi_se_stats_avg_connection_mem_usage":
-		return e.seAvgConnMem
-	case "se_stats.pct_connections_dropped", "avi_se_stats_pct_connections_dropped":
-		return e.sePctConnDropped
-	case "se_stats.avg_packet_buffer_usage", "avi_se_stats_avg_packet_buffer_usage":
-		return e.sePktBufUsage
-	case "se_stats.avg_persistent_table_usage", "avi_se_stats_avg_persistent_table_usage":
-		return e.sePersistTblUsage
-	case "se_stats.avg_ssl_session_cache_usage", "avi_se_stats_avg_ssl_session_cache_usage":
-		return e.seSslSessCache
-	}
-	return nil
+	return e.seAnalyticsGauges[metricID]
 }

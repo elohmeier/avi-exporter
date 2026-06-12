@@ -195,7 +195,7 @@ func (c *Client) Get(ctx context.Context, path string, out any, opt RequestOptio
 // GetRaw fetches a non-JSON response body. It uses the same authenticated Avi
 // session handling as Get.
 func (c *Client) GetRaw(ctx context.Context, path string, opt RequestOptions) ([]byte, error) {
-	return c.doRaw(ctx, http.MethodGet, path, opt, true, "text/plain")
+	return c.doRaw(ctx, http.MethodGet, path, opt, true, "application/json, */*;q=0.5")
 }
 
 // Post performs a POST request and unmarshals JSON into out.

@@ -252,8 +252,9 @@ func TestPoolMemberWrapperAndAnalyticsEdges(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/pool/pool-a/runtime/server/detail/":
 			writePoolRuntimeDetail(t, w, "10.0.0.1", 80)
-		case "/api/analytics/metrics/collection":
-			writeJSON(t, w, map[string]any{"series": map[string]any{}})
+		case "/api/analytics/prometheus-metrics/pool":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("# Successfully gathered 0 metrics for pool\n"))
 		default:
 			http.NotFound(w, r)
 		}
@@ -266,12 +267,9 @@ func TestPoolMemberWrapperAndAnalyticsEdges(t *testing.T) {
 	}
 
 	matchedZero, _ := newEdgeExporter(t, testConfig([]string{"admin"}, nil), func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/analytics/metrics/collection" {
-			writeJSON(t, w, map[string]any{
-				"series": map[string]any{
-					"unknown": []map[string]any{{"header": map[string]any{"name": "l4_server.avg_bandwidth"}, "data": []map[string]any{{"value": 1}}}},
-				},
-			})
+		if r.URL.Path == "/api/analytics/prometheus-metrics/pool" {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(`avi_l4_server_avg_bandwidth{uuid="unknown",type="pool",tenant="admin",name="unknown"} 1` + "\n"))
 			return
 		}
 		http.NotFound(w, r)
@@ -284,12 +282,9 @@ func TestPoolMemberWrapperAndAnalyticsEdges(t *testing.T) {
 	}
 
 	emptyData, _ := newEdgeExporter(t, testConfig([]string{"admin"}, nil), func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/analytics/metrics/collection" {
-			writeJSON(t, w, map[string]any{
-				"series": map[string]any{
-					"pool-a": []map[string]any{{"header": map[string]any{"name": "l4_server.avg_bandwidth"}, "data": []map[string]any{}}},
-				},
-			})
+		if r.URL.Path == "/api/analytics/prometheus-metrics/pool" {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("# Successfully gathered 0 metrics for pool\n"))
 			return
 		}
 		http.NotFound(w, r)
