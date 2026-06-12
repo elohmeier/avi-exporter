@@ -275,6 +275,13 @@ type VsRef struct {
 // UnmarshalJSON accepts both compact {uuid} references and documented {ref}
 // references, including include_name refs suffixed with "#<name>".
 func (v *VsRef) UnmarshalJSON(b []byte) error {
+	var ref string
+	if err := json.Unmarshal(b, &ref); err == nil {
+		v.UUID = RefUUID(ref)
+		v.Ref = ref
+		return nil
+	}
+
 	type raw VsRef
 	var r raw
 	if err := json.Unmarshal(b, &r); err != nil {

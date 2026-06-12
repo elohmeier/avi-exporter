@@ -370,11 +370,15 @@ func TestRequestErrors(t *testing.T) {
 				writeLoginCookies(w, "csrf", "session")
 				return
 			}
-			_, _ = w.Write([]byte(`not-json`))
+			_, _ = w.Write([]byte(strings.Repeat("x", 1100) + `not-json`))
 		})
 		var out struct{}
-		if err := client.Get(context.Background(), "/api/bad-json", &out, RequestOptions{}); err == nil {
+		err := client.Get(context.Background(), "/api/bad-json", &out, RequestOptions{})
+		if err == nil {
 			t.Fatalf("Get accepted invalid JSON")
+		}
+		if !strings.Contains(err.Error(), "response excerpt near byte") || !strings.Contains(err.Error(), "...") {
+			t.Fatalf("Get unmarshal error = %v, want bounded response excerpt", err)
 		}
 	})
 }

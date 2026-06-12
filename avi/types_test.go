@@ -86,7 +86,13 @@ func TestReferenceUnmarshalVariantsAndErrors(t *testing.T) {
 	if direct.UUID != "vs-direct" {
 		t.Fatalf("direct VS ref UUID = %q", direct.UUID)
 	}
-	if err := json.Unmarshal([]byte(`"bad"`), &direct); err == nil {
+	if err := json.Unmarshal([]byte(`"https://controller/api/virtualservice/virtualservice-string#vs-string"`), &direct); err != nil {
+		t.Fatalf("unmarshal string VS ref: %v", err)
+	}
+	if direct.UUID != "virtualservice-string" || direct.Ref == "" {
+		t.Fatalf("string VS ref = %#v", direct)
+	}
+	if err := json.Unmarshal([]byte(`42`), &direct); err == nil {
 		t.Fatalf("VsRef accepted invalid JSON type")
 	}
 
@@ -99,6 +105,28 @@ func TestReferenceUnmarshalVariantsAndErrors(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`"bad"`), &se); err == nil {
 		t.Fatalf("VipSeAssigned accepted invalid JSON type")
+	}
+}
+
+func TestPoolInventoryAcceptsStringVirtualServiceRefs(t *testing.T) {
+	raw := []byte(`{
+		"config": {"uuid": "pool-1", "name": "pool-1"},
+		"runtime": {"oper_status": {"state": "OPER_UP"}},
+		"virtualservices": [
+			"https://controller/api/virtualservice/virtualservice-vs-1#vs-1",
+			"virtualservice-vs-2"
+		]
+	}`)
+
+	var item PoolInventoryItem
+	if err := json.Unmarshal(raw, &item); err != nil {
+		t.Fatalf("unmarshal pool inventory with string virtualservices: %v", err)
+	}
+	if len(item.VirtualServices) != 2 {
+		t.Fatalf("virtualservices length = %d, want 2", len(item.VirtualServices))
+	}
+	if item.VirtualServices[0].UUID != "virtualservice-vs-1" || item.VirtualServices[1].UUID != "virtualservice-vs-2" {
+		t.Fatalf("virtualservices = %#v", item.VirtualServices)
 	}
 }
 

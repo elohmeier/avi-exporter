@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -286,7 +287,7 @@ func (c *Client) do(ctx context.Context, method, path string, out any, opt Reque
 		return nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("unmarshal %s response: %w", path, err)
+		return responseUnmarshalError(path, raw, err)
 	}
 	return nil
 }
@@ -321,4 +322,52 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func responseUnmarshalError(path string, raw []byte, err error) error {
+	offset := jsonErrorOffset(err)
+	excerpt := responseExcerpt(raw, offset, 1000)
+	if offset > 0 {
+		return fmt.Errorf("unmarshal %s response: %w (response excerpt near byte %d: %q)", path, err, offset, excerpt)
+	}
+	return fmt.Errorf("unmarshal %s response: %w (response excerpt: %q)", path, err, excerpt)
+}
+
+func jsonErrorOffset(err error) int64 {
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return syntaxErr.Offset
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) {
+		return typeErr.Offset
+	}
+	return 0
+}
+
+func responseExcerpt(raw []byte, offset int64, limit int) string {
+	if len(raw) <= limit || limit <= 0 {
+		return string(raw)
+	}
+
+	start := 0
+	if offset > 0 {
+		start = int(offset) - 1 - limit/3
+		if start < 0 {
+			start = 0
+		}
+		if start+limit > len(raw) {
+			start = len(raw) - limit
+		}
+	}
+
+	end := start + limit
+	excerpt := string(raw[start:end])
+	if start > 0 {
+		excerpt = "..." + excerpt
+	}
+	if end < len(raw) {
+		excerpt += "..."
+	}
+	return excerpt
 }
