@@ -192,15 +192,35 @@ func (c *Client) Get(ctx context.Context, path string, out any, opt RequestOptio
 	return c.do(ctx, "GET", path, out, opt, true)
 }
 
+// GetRaw fetches a non-JSON response body. It uses the same authenticated Avi
+// session handling as Get.
+func (c *Client) GetRaw(ctx context.Context, path string, opt RequestOptions) ([]byte, error) {
+	return c.doRaw(ctx, http.MethodGet, path, opt, true, "text/plain")
+}
+
 // Post performs a POST request and unmarshals JSON into out.
 func (c *Client) Post(ctx context.Context, path string, out any, opt RequestOptions) error {
 	return c.do(ctx, "POST", path, out, opt, true)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, out any, opt RequestOptions, retryOnAuth bool) error {
+	raw, err := c.doRaw(ctx, method, path, opt, retryOnAuth, "application/json")
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return responseUnmarshalError(path, raw, err)
+	}
+	return nil
+}
+
+func (c *Client) doRaw(ctx context.Context, method, path string, opt RequestOptions, retryOnAuth bool, accept string) ([]byte, error) {
 	if !c.hasSession() {
 		if err := c.Login(ctx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -217,17 +237,20 @@ func (c *Client) do(ctx context.Context, method, path string, out any, opt Reque
 	if opt.Body != nil {
 		raw, err := json.Marshal(opt.Body)
 		if err != nil {
-			return fmt.Errorf("marshal body: %w", err)
+			return nil, fmt.Errorf("marshal body: %w", err)
 		}
 		bodyReader = bytes.NewReader(raw)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	req.Header.Set("Accept", "application/json")
+	if accept == "" {
+		accept = "application/json"
+	}
+	req.Header.Set("Accept", accept)
 	if opt.Body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -254,12 +277,12 @@ func (c *Client) do(ctx context.Context, method, path string, out any, opt Reque
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read response: %w", err)
+		return nil, fmt.Errorf("read response: %w", err)
 	}
 
 	// CSRF token rotates mid-session — pick up any refreshed cookies.
@@ -272,24 +295,18 @@ func (c *Client) do(ctx context.Context, method, path string, out any, opt Reque
 			}
 			c.clearSession()
 			if err := c.Login(ctx); err != nil {
-				return fmt.Errorf("re-login: %w", err)
+				return nil, fmt.Errorf("re-login: %w", err)
 			}
-			return c.do(ctx, method, path, out, opt, false)
+			return c.doRaw(ctx, method, path, opt, false, accept)
 		}
-		return fmt.Errorf("%s %s: %s after re-login", method, path, resp.Status)
+		return nil, fmt.Errorf("%s %s: %s after re-login", method, path, resp.Status)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("%s %s: %s (%s)", method, path, resp.Status, truncate(string(raw), 200))
+		return nil, fmt.Errorf("%s %s: %s (%s)", method, path, resp.Status, truncate(string(raw), 200))
 	}
 
-	if out == nil {
-		return nil
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return responseUnmarshalError(path, raw, err)
-	}
-	return nil
+	return raw, nil
 }
 
 // refreshCookies updates csrfToken/sessionID from any Set-Cookie on resp.

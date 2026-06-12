@@ -1,10 +1,15 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 
 	"github.com/elohmeier/avi-exporter/avi"
 )
@@ -68,79 +73,129 @@ var seMetricIDs = []string{
 }
 
 func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInventoryItem, ch chan<- prometheus.Metric) error {
-	queries := make([]avi.MetricQuery, 0, len(seMetricIDs))
-	for _, id := range seMetricIDs {
-		queries = append(queries, avi.MetricQuery{
-			EntityUUID:   "*",
-			MetricEntity: avi.EntitySE,
-			MetricID:     id,
-			Step:         e.cfg.MetricsStep,
-			Limit:        e.cfg.MetricsLimit,
-		})
-	}
+	_ = items
+	_ = ch
 
-	resp, err := e.client.CollectMetrics(ctx, "admin", avi.MetricsCollectionRequest{MetricRequests: queries})
+	query := url.Values{}
+	query.Set("tenant", strings.Join(e.seMetricTenants(), ","))
+	query.Set("metric_id", strings.Join(seMetricIDs, ","))
+
+	raw, err := e.client.GetRaw(ctx, "/api/analytics/prometheus-metrics/serviceengine", avi.RequestOptions{Query: query})
 	if err != nil {
 		e.logger.Error("collect SE metrics", "err", err)
 		return fmt.Errorf("%w: %v", errAnalyticsFailed, err)
 	}
 
-	byUUID := make(map[string]avi.SEInventoryItem, len(items))
-	for _, it := range items {
-		byUUID[it.Config.UUID] = it
+	parser := expfmt.TextParser{}
+	families, err := parser.TextToMetricFamilies(bytes.NewReader(raw))
+	if err != nil {
+		e.logger.Error("parse SE metrics", "err", err)
+		return fmt.Errorf("%w: parse serviceengine prometheus metrics: %v", errAnalyticsFailed, err)
 	}
 
 	e.cacheMu.Lock()
 	defer e.cacheMu.Unlock()
 	resetGaugeVecs(e.seAnalyticsGaugeVecs()...)
 
-	for uuid, series := range resp.Series {
-		it, ok := byUUID[uuid]
-		if !ok {
+	for familyName, family := range families {
+		g := e.seGaugeFor(familyName)
+		if g == nil {
 			continue
 		}
-		labels := e.seLabelValues(it)
-		for _, s := range series {
-			v, ok := s.Last()
+		for _, metric := range family.GetMetric() {
+			value, ok := prometheusMetricValue(metric)
 			if !ok {
 				continue
 			}
-			if g := e.seGaugeFor(s.Header.Name); g != nil {
-				g.WithLabelValues(labels...).Set(v)
+			uuid := prometheusLabelValue(metric, "uuid")
+			name := prometheusLabelValue(metric, "name")
+			if uuid == "" && name == "" {
+				continue
 			}
+			if name == "" {
+				name = uuid
+			}
+			g.WithLabelValues(e.appendLabels(name, uuid)...).Set(value)
 		}
 	}
 
 	return nil
 }
 
+func (e *Exporter) seMetricTenants() []string {
+	e.cacheMu.Lock()
+	tenants := append([]string{}, e.tenants...)
+	e.cacheMu.Unlock()
+	if len(tenants) == 0 {
+		static, _ := e.configuredTenants()
+		tenants = static
+	}
+
+	out := make([]string, 0, len(tenants)+1)
+	seen := make(map[string]bool, len(tenants)+1)
+	for _, tenant := range append([]string{"admin"}, tenants...) {
+		tenant = strings.TrimSpace(tenant)
+		if tenant == "" || seen[tenant] {
+			continue
+		}
+		seen[tenant] = true
+		out = append(out, tenant)
+	}
+	if len(out) == 0 {
+		return []string{"admin"}
+	}
+	return out
+}
+
+func prometheusLabelValue(metric *dto.Metric, name string) string {
+	for _, label := range metric.GetLabel() {
+		if label.GetName() == name {
+			return label.GetValue()
+		}
+	}
+	return ""
+}
+
+func prometheusMetricValue(metric *dto.Metric) (float64, bool) {
+	if metric.GetGauge() != nil {
+		return metric.GetGauge().GetValue(), true
+	}
+	if metric.GetUntyped() != nil {
+		return metric.GetUntyped().GetValue(), true
+	}
+	if metric.GetCounter() != nil {
+		return metric.GetCounter().GetValue(), true
+	}
+	return 0, false
+}
+
 func (e *Exporter) seGaugeFor(metricID string) *prometheus.GaugeVec {
 	switch metricID {
-	case "se_stats.avg_cpu_usage":
+	case "se_stats.avg_cpu_usage", "avi_se_stats_avg_cpu_usage":
 		return e.seAvgCPUUsage
-	case "se_stats.avg_mem_usage":
+	case "se_stats.avg_mem_usage", "avi_se_stats_avg_mem_usage":
 		return e.seAvgMemUsage
-	case "se_stats.avg_disk1_usage":
+	case "se_stats.avg_disk1_usage", "avi_se_stats_avg_disk1_usage":
 		return e.seAvgDiskUsage
-	case "se_stats.avg_connections":
+	case "se_stats.avg_connections", "avi_se_stats_avg_connections":
 		return e.seAvgConnections
-	case "se_stats.avg_connections_dropped":
+	case "se_stats.avg_connections_dropped", "avi_se_stats_avg_connections_dropped":
 		return e.seAvgConnDropped
-	case "se_if.avg_rx_bytes":
+	case "se_if.avg_rx_bytes", "avi_se_if_avg_rx_bytes":
 		return e.seAvgRxBytes
-	case "se_if.avg_tx_bytes":
+	case "se_if.avg_tx_bytes", "avi_se_if_avg_tx_bytes":
 		return e.seAvgTxBytes
-	case "se_if.avg_bandwidth":
+	case "se_if.avg_bandwidth", "avi_se_if_avg_bandwidth":
 		return e.seAvgBandwidth
-	case "se_stats.avg_connection_mem_usage":
+	case "se_stats.avg_connection_mem_usage", "avi_se_stats_avg_connection_mem_usage":
 		return e.seAvgConnMem
-	case "se_stats.pct_connections_dropped":
+	case "se_stats.pct_connections_dropped", "avi_se_stats_pct_connections_dropped":
 		return e.sePctConnDropped
-	case "se_stats.avg_packet_buffer_usage":
+	case "se_stats.avg_packet_buffer_usage", "avi_se_stats_avg_packet_buffer_usage":
 		return e.sePktBufUsage
-	case "se_stats.avg_persistent_table_usage":
+	case "se_stats.avg_persistent_table_usage", "avi_se_stats_avg_persistent_table_usage":
 		return e.sePersistTblUsage
-	case "se_stats.avg_ssl_session_cache_usage":
+	case "se_stats.avg_ssl_session_cache_usage", "avi_se_stats_avg_ssl_session_cache_usage":
 		return e.seSslSessCache
 	}
 	return nil

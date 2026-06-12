@@ -350,6 +350,73 @@ func TestReadyFailsWhenTenantModuleDataIsMissing(t *testing.T) {
 	}
 }
 
+func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
+	var seInventoryCalls atomic.Int64
+	var seMetricsCalls atomic.Int64
+	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/serviceengine-inventory":
+			seInventoryCalls.Add(1)
+			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		case "/api/analytics/prometheus-metrics/serviceengine":
+			seMetricsCalls.Add(1)
+			if got := r.Header.Get("X-Avi-Tenant"); got != "" {
+				t.Fatalf("SE prometheus endpoint tenant header = %q, want empty", got)
+			}
+			if got := r.URL.Query().Get("tenant"); got != "admin,OCP-ENTW-BU" {
+				t.Fatalf("SE prometheus endpoint tenant query = %q", got)
+			}
+			metricID := r.URL.Query().Get("metric_id")
+			for _, want := range []string{"se_stats.avg_cpu_usage", "se_stats.avg_mem_usage", "se_if.avg_bandwidth"} {
+				if !strings.Contains(metricID, want) {
+					t.Fatalf("SE prometheus endpoint metric_id %q missing %q", metricID, want)
+				}
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = fmt.Fprintln(w, "# Successfully gathered 3 metrics for serviceengine")
+			_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 3.5`)
+			_, _ = fmt.Fprintln(w, `avi_se_if_avg_bandwidth{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 42`)
+			_, _ = fmt.Fprintln(w, `avi_se_stats_avg_mem_usage{uuid="se-2",type="serviceengine",tenant="admin",name="se-two"} 7`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer controller.Close()
+
+	cfg := testConfig([]string{"OCP-ENTW-BU"}, []string{
+		"cluster", "controller_metrics",
+		"vs_inventory", "vs_metrics",
+		"pool_inventory", "pool_metrics", "pool_members",
+		"vsvip", "pool_group", "gslb", "topology",
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	exp, err := NewExporter(cfg, controller.URL, "user", "pass", true, "", 1, logger)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	err = exp.RefreshOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "/api/serviceengine-inventory") {
+		t.Fatalf("RefreshOnce error = %v, want SE inventory failure", err)
+	}
+	if got := seInventoryCalls.Load(); got != 1 {
+		t.Fatalf("SE inventory calls = %d, want 1", got)
+	}
+	if got := seMetricsCalls.Load(); got != 1 {
+		t.Fatalf("SE prometheus endpoint calls = %d, want 1", got)
+	}
+
+	mfs := gatherRegisteredExporter(t, exp)
+	if got := metricValueForLabel(t, metricFamily(t, mfs, "avi_se_avg_cpu_usage"), "se", "se-one"); got != 3.5 {
+		t.Fatalf("avi_se_avg_cpu_usage for se-one = %v, want 3.5", got)
+	}
+	if got := metricValueForLabel(t, metricFamily(t, mfs, "avi_se_if_avg_bandwidth_bps"), "se", "se-one"); got != 42 {
+		t.Fatalf("avi_se_if_avg_bandwidth_bps for se-one = %v, want 42", got)
+	}
+	if got := metricValueForLabel(t, metricFamily(t, mfs, "avi_se_avg_mem_usage"), "se", "se-two"); got != 7 {
+		t.Fatalf("avi_se_avg_mem_usage for se-two = %v, want 7", got)
+	}
+}
+
 func TestFailedPoolMemberRefreshKeepsLastGoodMembers(t *testing.T) {
 	var failPoolB atomic.Bool
 	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {

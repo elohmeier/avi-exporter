@@ -303,6 +303,35 @@ func TestGetPostRetryAndCookieRefresh(t *testing.T) {
 	}
 }
 
+func TestGetRaw(t *testing.T) {
+	client, _ := newAviTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			writeLoginCookies(w, "csrf", "session")
+		case "/api/plain":
+			if got := r.Header.Get("Accept"); got != "text/plain" {
+				t.Fatalf("Accept = %q, want text/plain", got)
+			}
+			if got := r.URL.Query().Get("tenant"); got != "admin,tenant-a" {
+				t.Fatalf("tenant query = %q", got)
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte("plain response"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	query := url.Values{"tenant": []string{"admin,tenant-a"}}
+	raw, err := client.GetRaw(context.Background(), "/api/plain", RequestOptions{Query: query})
+	if err != nil {
+		t.Fatalf("GetRaw: %v", err)
+	}
+	if string(raw) != "plain response" {
+		t.Fatalf("GetRaw body = %q", raw)
+	}
+}
+
 func TestRequestErrors(t *testing.T) {
 	t.Run("login required", func(t *testing.T) {
 		client, _ := NewClient("http://bad.example", "u", "p", "", false, "", nil)

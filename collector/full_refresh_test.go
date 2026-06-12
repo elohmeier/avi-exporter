@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,6 +22,8 @@ func TestFullRefreshCoversAllModules(t *testing.T) {
 			writeFullClusterRuntime(t, w)
 		case "/api/analytics/metrics/collection":
 			writeFullAnalytics(t, w, r)
+		case "/api/analytics/prometheus-metrics/serviceengine":
+			writeFullSEPrometheusMetrics(t, w)
 		case "/api/serviceengine-inventory":
 			writeFullSEInventory(t, w)
 		case "/api/virtualservice-inventory":
@@ -62,6 +65,9 @@ func TestFullRefreshCoversAllModules(t *testing.T) {
 	}
 	if got := countMetricsWithLabel(metricFamily(t, mfs, "avi_se_oper_up"), "se_uuid", "se-a"); got != 1 {
 		t.Fatalf("SE metrics for se-a = %d, want 1", got)
+	}
+	if got := countMetricsWithLabel(metricFamily(t, mfs, "avi_se_avg_cpu_usage"), "se_uuid", "se-a"); got != 1 {
+		t.Fatalf("SE analytics for se-a = %d, want 1", got)
 	}
 	if got := countMetricsWithLabel(metricFamily(t, mfs, "avi_vs_l4_client_avg_bandwidth_bps"), "vs_uuid", "vs-a"); got != 1 {
 		t.Fatalf("VS analytics for vs-a = %d, want 1", got)
@@ -207,6 +213,14 @@ func writeFullSEInventory(t *testing.T, w http.ResponseWriter) {
 			},
 		},
 	})
+}
+
+func writeFullSEPrometheusMetrics(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = fmt.Fprintln(w, "# Successfully gathered 2 metrics for serviceengine")
+	_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-a",type="serviceengine",tenant="admin",name="se-a"} 12`)
+	_, _ = fmt.Fprintln(w, `avi_se_stats_avg_mem_usage{uuid="se-a",type="serviceengine",tenant="admin",name="se-a"} 34`)
 }
 
 func writeFullVSInventory(t *testing.T, w http.ResponseWriter) {

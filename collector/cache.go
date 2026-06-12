@@ -337,25 +337,25 @@ func (e *Exporter) refreshServiceEngines(ctx context.Context) error {
 
 	var errs []error
 	var seItems []avi.SEInventoryItem
-	if err := e.runModule(ctx, "se_list", "", func(ctx context.Context) error {
-		items, err := e.client.ListSEInventory(ctx)
-		if err != nil {
-			return err
-		}
-		seItems = items
-		return nil
-	}); err != nil {
-		return err
-	}
-
 	if !e.cfg.IsModuleDisabled("se_inventory") {
-		_ = e.runModule(ctx, "se_inventory", "", func(ctx context.Context) error {
+		if err := e.runModule(ctx, "se_list", "", func(ctx context.Context) error {
+			items, err := e.client.ListSEInventory(ctx)
+			if err != nil {
+				return err
+			}
+			seItems = items
+			return nil
+		}); err != nil {
+			errs = append(errs, err)
+		} else if err := e.runModule(ctx, "se_inventory", "", func(ctx context.Context) error {
 			e.cacheMu.Lock()
 			defer e.cacheMu.Unlock()
 			resetGaugeVecs(e.seInventoryGaugeVecs()...)
 			e.collectSEInventory(ctx, seItems, nil)
 			return nil
-		})
+		}); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	if !e.cfg.IsModuleDisabled("se_metrics") {
@@ -702,7 +702,7 @@ func (e *Exporter) requiredModuleKeysLocked() []moduleKey {
 	if !e.cfg.IsModuleDisabled("controller_metrics") {
 		add("controller_metrics", "")
 	}
-	if !e.cfg.IsModuleDisabled("se_inventory") || !e.cfg.IsModuleDisabled("se_metrics") {
+	if !e.cfg.IsModuleDisabled("se_inventory") {
 		add("se_list", "")
 	}
 	if !e.cfg.IsModuleDisabled("se_inventory") {
