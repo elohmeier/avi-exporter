@@ -53,6 +53,13 @@ func writeLoginCookies(w http.ResponseWriter, csrf, session string) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
+func writeLoginTenants(w http.ResponseWriter, csrf, session string) {
+	http.SetCookie(w, &http.Cookie{Name: "csrftoken", Value: csrf})
+	http.SetCookie(w, &http.Cookie{Name: "sessionid", Value: session})
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"tenants":[{"uuid":"tenant-a-uuid","name":"tenant-a"},{"uuid":"tenant-b-uuid","name":"tenant-b"}]}`))
+}
+
 func TestNewClientTLSOptions(t *testing.T) {
 	insecure, err := NewClient(" https://avi.example.com/ ", "u", "p", "v", true, "", nil)
 	if err != nil {
@@ -149,6 +156,33 @@ func TestLoginSuccessNoopAndCloseIdle(t *testing.T) {
 		t.Fatalf("login requests = %d, want 1", got)
 	}
 	client.CloseIdleConnections()
+}
+
+func TestLoginTenantsFromLoginResponse(t *testing.T) {
+	client, _ := newAviTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/login" {
+			http.NotFound(w, r)
+			return
+		}
+		writeLoginTenants(w, "csrf", "session")
+	})
+
+	tenants, err := client.LoginTenants(context.Background())
+	if err != nil {
+		t.Fatalf("LoginTenants: %v", err)
+	}
+	if got, want := []string{tenants[0].Name, tenants[1].Name}, []string{"tenant-a", "tenant-b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("login tenants = %#v, want %#v", got, want)
+	}
+
+	tenants[0].Name = "mutated"
+	again, err := client.LoginTenants(context.Background())
+	if err != nil {
+		t.Fatalf("second LoginTenants: %v", err)
+	}
+	if again[0].Name != "tenant-a" {
+		t.Fatalf("LoginTenants returned mutable client state: %#v", again)
+	}
 }
 
 func TestLoginErrors(t *testing.T) {

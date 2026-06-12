@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -565,6 +566,56 @@ func TestWildcardTenantRefreshRemovesDroppedTenantMetrics(t *testing.T) {
 	}
 }
 
+func TestWildcardTenantRefreshUsesLoginTenants(t *testing.T) {
+	var seenMu sync.Mutex
+	seen := map[string]int{}
+
+	controller := newFakeControllerWithLogin(t, map[string]any{
+		"tenants": []map[string]string{
+			{"name": "tenant-b", "uuid": "tenant-b-uuid"},
+			{"name": "tenant-a", "uuid": "tenant-a-uuid"},
+		},
+	}, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tenant":
+			t.Errorf("wildcard discovery called /api/tenant despite login tenants")
+			http.Error(w, "tenant discovery forbidden", http.StatusForbidden)
+		case "/api/virtualservice-inventory":
+			tenant := r.Header.Get("X-Avi-Tenant")
+			seenMu.Lock()
+			seen[tenant]++
+			seenMu.Unlock()
+			writeVSInventory(t, w, tenant, "OPER_UP")
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	defer controller.Close()
+
+	cfg := testConfig([]string{"*"}, []string{
+		"cluster", "controller_metrics",
+		"se_inventory", "se_metrics",
+		"vs_metrics",
+		"pool_inventory", "pool_metrics", "pool_members",
+		"vsvip", "pool_group", "gslb", "topology",
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	exp, err := NewExporter(cfg, controller.URL, "user", "pass", true, "", 1, logger)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := exp.RefreshOnce(context.Background()); err != nil {
+		t.Fatalf("RefreshOnce: %v", err)
+	}
+
+	if !reflect.DeepEqual(exp.CacheStatus().Tenants, []string{"tenant-a", "tenant-b"}) {
+		t.Fatalf("tenants = %#v, want tenant-a/tenant-b", exp.CacheStatus().Tenants)
+	}
+	if !reflect.DeepEqual(seen, map[string]int{"tenant-a": 1, "tenant-b": 1}) {
+		t.Fatalf("refreshed tenants = %#v, want tenant-a and tenant-b", seen)
+	}
+}
+
 func TestTenantRefreshHonorsParallelism(t *testing.T) {
 	var current atomic.Int64
 	var maxConcurrent atomic.Int64
@@ -766,12 +817,16 @@ func writeVsVipInventory(t *testing.T, w http.ResponseWriter) {
 }
 
 func newFakeController(t *testing.T, api http.HandlerFunc) *httptest.Server {
+	return newFakeControllerWithLogin(t, map[string]bool{"ok": true}, api)
+}
+
+func newFakeControllerWithLogin(t *testing.T, loginBody any, api http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/login" {
 			http.SetCookie(w, &http.Cookie{Name: "csrftoken", Value: "csrf-token"})
 			http.SetCookie(w, &http.Cookie{Name: "sessionid", Value: "session-id"})
-			writeJSON(t, w, map[string]string{"ok": "true"})
+			writeJSON(t, w, loginBody)
 			return
 		}
 		if r.Header.Get("X-Avi-Version") == "" {

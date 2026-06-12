@@ -161,8 +161,8 @@ func TestRefreshFailureBranches(t *testing.T) {
 		}
 		http.NotFound(w, r)
 	})
-	if tenants, err := wildcard.refreshTenants(context.Background()); err == nil || !reflect.DeepEqual(tenants, []string{"admin"}) {
-		t.Fatalf("refreshTenants fallback = %#v, %v; want admin plus error", tenants, err)
+	if tenants, err := wildcard.refreshTenants(context.Background()); err == nil || len(tenants) != 0 {
+		t.Fatalf("refreshTenants fallback = %#v, %v; want no implicit tenant plus error", tenants, err)
 	}
 	if err := wildcard.RefreshOnce(context.Background()); err == nil {
 		t.Fatalf("wildcard RefreshOnce succeeded with failed discovery")

@@ -34,8 +34,13 @@ type Client struct {
 	authMu    sync.Mutex
 	csrfToken string
 	sessionID string
+	tenants   []Tenant
 
 	logger *slog.Logger
+}
+
+type loginResponse struct {
+	Tenants []Tenant `json:"tenants"`
 }
 
 // NewClient builds a session-based client. caFile and ignoreCert are mutually
@@ -91,6 +96,7 @@ func (c *Client) clearSession() {
 	defer c.authMu.Unlock()
 	c.csrfToken = ""
 	c.sessionID = ""
+	c.tenants = nil
 }
 
 // Login posts to /login and captures the csrftoken + sessionid cookies.
@@ -144,15 +150,33 @@ func (c *Client) Login(ctx context.Context) error {
 		return fmt.Errorf("login response missing csrftoken/sessionid cookies")
 	}
 
+	var login loginResponse
+	if err := json.Unmarshal(rawBody, &login); err != nil && c.logger != nil {
+		c.logger.Debug("could not parse avi login response", "err", err)
+	}
+
 	c.authMu.Lock()
 	c.csrfToken = csrf
 	c.sessionID = sid
+	c.tenants = append([]Tenant{}, login.Tenants...)
 	c.authMu.Unlock()
 
 	if c.logger != nil {
 		c.logger.Info("avi login successful", "url", c.baseURL)
 	}
 	return nil
+}
+
+// LoginTenants returns the tenant list included in the authenticated /login
+// response. It is scoped to the logged-in user and does not require read
+// access on the Tenant resource.
+func (c *Client) LoginTenants(ctx context.Context) ([]Tenant, error) {
+	if err := c.Login(ctx); err != nil {
+		return nil, err
+	}
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	return append([]Tenant{}, c.tenants...), nil
 }
 
 // RequestOptions controls per-request behavior.

@@ -10,7 +10,7 @@ import (
 type Config struct {
 	Labels          map[string]string
 	DisabledModules []string
-	Tenants         []string // tenant names to scrape; "*" means all tenants (discovered via /api/tenant)
+	Tenants         []string // tenant names to scrape; "*" means all tenants visible at login, with /api/tenant fallback
 	APIVersion      string   // X-Avi-Version header value; defaults to a recent supported version
 	MetricsStep     int      // analytics step in seconds (default 300)
 	MetricsLimit    int      // analytics limit (number of samples; default 1)

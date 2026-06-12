@@ -163,7 +163,7 @@ func (e *Exporter) refreshTenants(ctx context.Context) ([]string, error) {
 
 	var discovered []string
 	err := e.runModule(ctx, "tenant_discovery", "", func(ctx context.Context) error {
-		tenants, err := e.client.ListTenants(ctx)
+		tenants, err := e.client.LoginTenants(ctx)
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,16 @@ func (e *Exporter) refreshTenants(ctx context.Context) ([]string, error) {
 		for _, t := range tenants {
 			names = append(names, t.Name)
 		}
-		discovered = normalizeTenants(names)
+		if len(tenants) == 0 {
+			tenants, err = e.client.ListTenants(ctx)
+			if err != nil {
+				return err
+			}
+			for _, t := range tenants {
+				names = append(names, t.Name)
+			}
+		}
+		discovered = normalizeTenantNames(names)
 
 		e.cacheMu.Lock()
 		e.setTenantsLocked(discovered)
@@ -186,10 +195,16 @@ func (e *Exporter) refreshTenants(ctx context.Context) ([]string, error) {
 	e.cacheMu.Lock()
 	cached := append([]string{}, e.tenants...)
 	e.cacheMu.Unlock()
-	if len(cached) == 0 {
-		cached = []string{"admin"}
+	if len(cached) > 0 {
+		return cached, err
 	}
-	return cached, err
+	if len(static) > 0 {
+		e.cacheMu.Lock()
+		e.setTenantsLocked(static)
+		e.cacheMu.Unlock()
+		return static, err
+	}
+	return nil, err
 }
 
 func (e *Exporter) configuredTenants() ([]string, bool) {
@@ -252,8 +267,16 @@ func (e *Exporter) removeTenantCacheLocked(tenant string) {
 }
 
 func normalizeTenants(in []string) []string {
-	if len(in) == 0 {
+	out := normalizeTenantNames(in)
+	if len(out) == 0 {
 		return []string{"admin"}
+	}
+	return out
+}
+
+func normalizeTenantNames(in []string) []string {
+	if len(in) == 0 {
+		return nil
 	}
 	seen := make(map[string]bool, len(in))
 	out := make([]string, 0, len(in))
@@ -265,7 +288,7 @@ func normalizeTenants(in []string) []string {
 		out = append(out, n)
 	}
 	if len(out) == 0 {
-		return []string{"admin"}
+		return nil
 	}
 	sort.Strings(out)
 	return out

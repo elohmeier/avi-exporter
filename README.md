@@ -49,9 +49,11 @@ time-series counters.
 | `AVI_LABELS` | Base labels (`k=v,k=v`), merged with `-labels` | no |
 | `AVI_DISABLED_MODULES` | Base disabled modules, merged with `-disabled-modules` | no |
 
-Tenant selection defaults to `admin`. When `*` is present, the exporter
-discovers tenants from `/api/tenant`; any explicit tenant names are kept and
-merged with the discovered set.
+Tenant selection defaults to `admin`. When `*` is present, the exporter first
+uses the tenant list returned by `/login`, which is scoped to the authenticated
+user and does not require Tenant read permissions. If the login response does
+not include tenants, it falls back to `/api/tenant`. Any explicit tenant names
+are kept and merged with the discovered set.
 
 ### CLI flags
 
