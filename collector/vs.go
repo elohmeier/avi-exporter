@@ -120,6 +120,10 @@ func (e *Exporter) collectVSAnalytics(ctx context.Context, tenant string, items 
 		byUUID[it.Config.UUID] = it
 	}
 
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	deleteTenantGaugeVecs(tenant, e.vsAnalyticsGaugeVecs()...)
+
 	for uuid, series := range resp.Series {
 		it, ok := byUUID[uuid]
 		if !ok {

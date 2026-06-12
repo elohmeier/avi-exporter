@@ -90,6 +90,10 @@ func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInvento
 		byUUID[it.Config.UUID] = it
 	}
 
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	resetGaugeVecs(e.seAnalyticsGaugeVecs()...)
+
 	for uuid, series := range resp.Series {
 		it, ok := byUUID[uuid]
 		if !ok {

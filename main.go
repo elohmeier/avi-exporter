@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -137,16 +138,23 @@ func main() {
 		logger.Error("failed to create exporter", "err", err)
 		os.Exit(1)
 	}
+	exporter.Start(context.Background())
 
 	prometheus.MustRegister(exporter)
 
 	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK\n"))
+	})
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		w.Write([]byte("OK\n"))
 	})
+	http.HandleFunc("/readyz", exporter.ReadyHandler)
+	http.HandleFunc("/debug/cache", exporter.DebugCacheHandler)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(app + " - /metrics for Prometheus metrics"))
+		w.Write([]byte(app + "\n\nEndpoints:\n  /metrics\n  /healthz\n  /readyz\n  /debug/cache\n"))
 	})
 
 	listenAddr := ":" + strconv.Itoa(bindPort)

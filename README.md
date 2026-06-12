@@ -13,9 +13,9 @@ time-series counters.
   `sessionid`+`csrftoken` cookies, every subsequent request carries
   `X-CSRFToken`, `Referer`, `X-Avi-Version`, optional `X-Avi-Tenant`. CSRF
   rotates mid-session and the client picks up the new token from each response.
-- For each scrape: pull inventory endpoints (state, health_score, oper_status),
-  then one bulk `POST /api/analytics/metrics/collection` per entity type using
-  `entity_uuid: "*"` to fan out across all entities.
+- A background scheduler refreshes inventory and analytics into an in-process
+  cache. Prometheus scrapes read the cache only, so scrape fanout does not
+  directly become Avi API load.
 - Modules can be disabled if your controller can't serve them or you don't want
   them.
 - **AKO awareness:** when an object was created by AKO (`created_by` prefix
@@ -93,6 +93,7 @@ docker run -p 9290:9290 \
 | Module | Description |
 | --- | --- |
 | `cluster` | Controller cluster + per-node up/leader status |
+| `controller_metrics` | Controller CPU, memory, disk, active virtual services, and backend server analytics |
 | `vs_inventory` | Per-VS oper_status, enabled, health_score, percent_ses_up |
 | `vs_metrics` | Per-VS L4/L7 client analytics (bandwidth, conns, 2xx/4xx/5xx, apdex, RTT) |
 | `pool_inventory` | Per-pool oper_status, health_score, num_servers (and per-member up/enabled) |
@@ -111,10 +112,17 @@ Disable with `-disabled-modules vs_metrics,se_metrics`.
 
 | Metric | Description |
 | --- | --- |
-| `avi_up{tenant}` | 1 if the last per-tenant scrape had no module errors |
-| `avi_scrape_duration_seconds{module,tenant}` | Wall-clock duration of each module's last run |
-| `avi_scrape_total{module,tenant}` | Cumulative attempt count |
-| `avi_scrape_errors_total{module,tenant}` | Cumulative error count |
+| `avi_up{tenant}` | 1 if the last per-tenant background refresh had no module errors |
+| `avi_module_last_success_timestamp_seconds{module,tenant}` | Unix timestamp of the last successful module refresh |
+| `avi_module_last_attempt_timestamp_seconds{module,tenant}` | Unix timestamp of the last attempted module refresh |
+| `avi_module_age_seconds{module,tenant}` | Age of the cached data currently served |
+| `avi_module_stale{module,tenant}` | 1 when cached data is older than the module stale threshold |
+| `avi_module_refresh_duration_seconds{module,tenant}` | Wall-clock duration of each module's last refresh |
+| `avi_module_refresh_total{module,tenant}` | Cumulative refresh attempt count |
+| `avi_module_refresh_errors_total{module,tenant}` | Cumulative refresh error count |
+| `avi_scrape_duration_seconds{module,tenant}` | Compatibility alias for module refresh duration |
+| `avi_scrape_total{module,tenant}` | Compatibility alias for module refresh attempts |
+| `avi_scrape_errors_total{module,tenant}` | Compatibility alias for module refresh errors |
 
 ### Operational-status info metrics
 
@@ -129,8 +137,11 @@ admin-disabled from genuinely broken.
 
 | Path | Description |
 | --- | --- |
-| `/metrics` | Prometheus metrics |
-| `/health` | Liveness probe (always 200 OK) |
+| `/metrics` | Cached Prometheus metrics; does not call Avi |
+| `/healthz` | Liveness probe (always 200 OK) |
+| `/health` | Backward-compatible liveness probe (always 200 OK) |
+| `/readyz` | Readiness probe; returns 503 when required cached module data is missing or stale |
+| `/debug/cache` | JSON cache/module freshness status |
 
 ## Auth & versioning notes
 
@@ -150,8 +161,9 @@ admin-disabled from genuinely broken.
 ## Recommended scrape interval
 
 Avi aggregates analytics on a 5-minute boundary. The defaults (`step=300`,
-`limit=1`) return the latest 5-min average. Scrape at 60-300s; scraping faster
-than the aggregation step gives you no fresher data.
+`limit=1`) return the latest 5-min average. The exporter refreshes its cache in
+the background and `/metrics` never calls Avi, but scraping faster than the cache
+and aggregation cadence still gives you no fresher controller data.
 
 ## License
 

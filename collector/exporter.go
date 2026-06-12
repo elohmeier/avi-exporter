@@ -1,9 +1,11 @@
 package collector
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -15,14 +17,25 @@ const namespace = "avi"
 
 // Exporter implements prometheus.Collector for an Avi controller.
 type Exporter struct {
-	collectMu   sync.Mutex
-	cfg         *config.Config
-	url         string
-	parallelism int
-	labelKeys   []string
-	baseLabels  []string // cached values for labelKeys (immutable across the process)
-	logger      *slog.Logger
-	client      *avi.Client
+	refreshMu       sync.Mutex
+	cacheMu         sync.Mutex
+	startOnce       sync.Once
+	schedulerCancel context.CancelFunc
+	cfg             *config.Config
+	url             string
+	parallelism     int
+	labelKeys       []string
+	baseLabels      []string // cached values for labelKeys (immutable across the process)
+	logger          *slog.Logger
+	client          *avi.Client
+
+	tenants              []string
+	moduleStates         map[moduleKey]*moduleState
+	clusterUpValue       float64
+	clusterProgressValue float64
+	clusterCached        bool
+	refreshInterval      time.Duration
+	refreshTimeout       time.Duration
 
 	// --- Self-metrics ---
 	up                *prometheus.GaugeVec
@@ -30,12 +43,29 @@ type Exporter struct {
 	scrapeErrorsTotal *prometheus.CounterVec
 	scrapeTotal       *prometheus.CounterVec
 
+	moduleLastSuccess        *prometheus.GaugeVec
+	moduleLastAttempt        *prometheus.GaugeVec
+	moduleAge                *prometheus.GaugeVec
+	moduleStale              *prometheus.GaugeVec
+	moduleRefreshDuration    *prometheus.GaugeVec
+	moduleRefreshErrorsTotal *prometheus.CounterVec
+	moduleRefreshTotal       *prometheus.CounterVec
+
 	// --- Cluster (admin tenant) ---
 	clusterUp        *prometheus.Desc
 	clusterProgress  *prometheus.Desc
 	clusterStateInfo *prometheus.GaugeVec
 	clusterNodeUp    *prometheus.GaugeVec
 	clusterNodeRole  *prometheus.GaugeVec
+
+	// --- Controller analytics ---
+	controllerAvgCPUUsage          *prometheus.GaugeVec
+	controllerAvgMemUsage          *prometheus.GaugeVec
+	controllerAvgDiskUsage         *prometheus.GaugeVec
+	controllerAvgDiskReadBytes     *prometheus.GaugeVec
+	controllerAvgDiskWriteBytes    *prometheus.GaugeVec
+	controllerAvgNumActiveVS       *prometheus.GaugeVec
+	controllerAvgNumBackendServers *prometheus.GaugeVec
 
 	// --- Virtual Service inventory ---
 	vsOperUp         *prometheus.GaugeVec
@@ -180,6 +210,8 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 
 	// Label sets — see appendLabels() / xxxLabelValues() helpers in each file.
 	clusterLbl := append(append([]string{}, base...), "node")
+	controllerLbl := append(append([]string{}, base...), "controller_uuid")
+	moduleLbl := append(append([]string{}, base...), "module", "tenant")
 	tenantBase := append(append([]string{}, base...), "tenant")
 	vsLbl := append(append([]string{}, tenantBase...), "vs", "vs_uuid", "namespace", "service", "ingress", "host", "ako")
 	vsVipLbl := append(append([]string{}, vsLbl...), "vip_id", "ip")
@@ -209,19 +241,29 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 	}
 
 	return &Exporter{
-		cfg:         cfg,
-		url:         url,
-		parallelism: parallelism,
-		labelKeys:   base,
-		baseLabels:  baseVals,
-		logger:      logger,
-		client:      client,
+		cfg:             cfg,
+		url:             url,
+		parallelism:     parallelism,
+		labelKeys:       base,
+		baseLabels:      baseVals,
+		logger:          logger,
+		client:          client,
+		moduleStates:    make(map[moduleKey]*moduleState),
+		refreshInterval: defaultRefreshInterval,
+		refreshTimeout:  defaultRefreshTimeout,
 
 		// Self-metrics
-		up:                g("up", "1 if the last scrape of this tenant succeeded", append(append([]string{}, base...), "tenant")),
-		scrapeDuration:    g("scrape_duration_seconds", "Wall-clock duration of the last scrape per module/tenant", append(append([]string{}, base...), "module", "tenant")),
-		scrapeErrorsTotal: c("scrape_errors_total", "Cumulative errors per module/tenant", append(append([]string{}, base...), "module", "tenant")),
-		scrapeTotal:       c("scrape_total", "Cumulative scrape attempts per module/tenant", append(append([]string{}, base...), "module", "tenant")),
+		up:                       g("up", "1 if the last background refresh of this tenant succeeded", append(append([]string{}, base...), "tenant")),
+		scrapeDuration:           g("scrape_duration_seconds", "Compatibility alias for avi_module_refresh_duration_seconds", moduleLbl),
+		scrapeErrorsTotal:        c("scrape_errors_total", "Compatibility alias for avi_module_refresh_errors_total", moduleLbl),
+		scrapeTotal:              c("scrape_total", "Compatibility alias for avi_module_refresh_total", moduleLbl),
+		moduleLastSuccess:        g("module_last_success_timestamp_seconds", "Unix timestamp of the last successful module refresh", moduleLbl),
+		moduleLastAttempt:        g("module_last_attempt_timestamp_seconds", "Unix timestamp of the last attempted module refresh", moduleLbl),
+		moduleAge:                g("module_age_seconds", "Age of the cached data currently served by module", moduleLbl),
+		moduleStale:              g("module_stale", "1 when the module cache is older than its stale threshold", moduleLbl),
+		moduleRefreshDuration:    g("module_refresh_duration_seconds", "Wall-clock duration of the last module refresh", moduleLbl),
+		moduleRefreshErrorsTotal: c("module_refresh_errors_total", "Cumulative module refresh failures", moduleLbl),
+		moduleRefreshTotal:       c("module_refresh_total", "Cumulative module refresh attempts", moduleLbl),
 
 		// Cluster
 		clusterUp:        prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "cluster_up"), "1 if the controller cluster is up and HA active", base, nil),
@@ -229,6 +271,15 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		clusterStateInfo: g("cluster_state_info", "Cluster state label-carrying info metric (always 1)", withTrailing(base, "state")),
 		clusterNodeUp:    g("cluster_node_up", "1 if the named controller node is up", clusterLbl),
 		clusterNodeRole:  g("cluster_node_leader", "1 if the named node is the cluster leader", clusterLbl),
+
+		// Controller analytics
+		controllerAvgCPUUsage:          g("controller_avg_cpu_usage", "Controller average CPU usage percent", controllerLbl),
+		controllerAvgMemUsage:          g("controller_avg_mem_usage", "Controller average memory usage percent", controllerLbl),
+		controllerAvgDiskUsage:         g("controller_avg_disk_usage", "Controller average disk usage percent", controllerLbl),
+		controllerAvgDiskReadBytes:     g("controller_avg_disk_read_bytes", "Controller average disk read bytes", controllerLbl),
+		controllerAvgDiskWriteBytes:    g("controller_avg_disk_write_bytes", "Controller average disk write bytes", controllerLbl),
+		controllerAvgNumActiveVS:       g("controller_avg_num_active_vs", "Controller average active virtual services", controllerLbl),
+		controllerAvgNumBackendServers: g("controller_avg_num_backend_servers", "Controller average backend servers", controllerLbl),
 
 		// VS inventory
 		vsOperUp:         g("vs_oper_up", "1 if virtual service oper_status is OPER_UP", vsLbl),
@@ -364,6 +415,13 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.scrapeDuration.Describe(ch)
 	e.scrapeErrorsTotal.Describe(ch)
 	e.scrapeTotal.Describe(ch)
+	e.moduleLastSuccess.Describe(ch)
+	e.moduleLastAttempt.Describe(ch)
+	e.moduleAge.Describe(ch)
+	e.moduleStale.Describe(ch)
+	e.moduleRefreshDuration.Describe(ch)
+	e.moduleRefreshErrorsTotal.Describe(ch)
+	e.moduleRefreshTotal.Describe(ch)
 
 	e.clusterStateInfo.Describe(ch)
 	e.clusterNodeUp.Describe(ch)
@@ -379,6 +437,9 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 func (e *Exporter) allGaugeVecs() []*prometheus.GaugeVec {
 	return []*prometheus.GaugeVec{
 		e.clusterStateInfo, e.clusterNodeUp, e.clusterNodeRole,
+		e.controllerAvgCPUUsage, e.controllerAvgMemUsage, e.controllerAvgDiskUsage,
+		e.controllerAvgDiskReadBytes, e.controllerAvgDiskWriteBytes,
+		e.controllerAvgNumActiveVS, e.controllerAvgNumBackendServers,
 		e.vsOperUp, e.vsOperStatusInfo, e.vsEnabled, e.vsHealthScore, e.vsPercentSesUp, e.vsTypeInfo, e.vsAlertLevel,
 		e.vsVipOperUp, e.vsVipPercentSesUp, e.vsVipNumSeAssigned, e.vsVipNumSeRequested, e.vsVipOperStatusInfo,
 		e.vsAvgBandwidth, e.vsAvgCompleteConns, e.vsAvgNewEstabConns, e.vsMaxOpenConns, e.vsConnectionsDropped,

@@ -13,6 +13,11 @@ import (
 	"github.com/elohmeier/avi-exporter/avi"
 )
 
+type poolMemberSnapshot struct {
+	Pool   avi.PoolInventoryItem
+	Server avi.ServerRuntimeDetail
+}
+
 // poolLabelValues returns the label values for a pool, in poolLbl order.
 func (e *Exporter) poolLabelValues(tenant string, item avi.PoolInventoryItem) []string {
 	mi := avi.ParseMarkers(item.Config.Markers)
@@ -61,11 +66,25 @@ func (e *Exporter) collectPoolInventory(ctx context.Context, tenant string, item
 // Per-pool failures are counted and surfaced as a synthetic module error
 // (with a sample first error) so runModule increments scrape_errors_total.
 func (e *Exporter) collectPoolMembers(ctx context.Context, tenant string, items []avi.PoolInventoryItem, ch chan<- prometheus.Metric) error {
+	members, err := e.collectPoolMemberDetails(ctx, tenant, items)
+	if err != nil {
+		return err
+	}
+	e.renderPoolMembers(tenant, members)
+	if !e.cfg.IsModuleDisabled("topology") {
+		e.renderPoolMemberTopology(tenant, members)
+	}
+	return nil
+}
+
+func (e *Exporter) collectPoolMemberDetails(ctx context.Context, tenant string, items []avi.PoolInventoryItem) ([]poolMemberSnapshot, error) {
 	sem := make(chan struct{}, e.parallelism)
 	var wg sync.WaitGroup
 	var failed atomic.Int64
 	var firstErrMu sync.Mutex
 	var firstErr error
+	var membersMu sync.Mutex
+	members := make([]poolMemberSnapshot, 0)
 
 	for _, it := range items {
 		it := it
@@ -91,47 +110,62 @@ func (e *Exporter) collectPoolMembers(ctx context.Context, tenant string, items 
 				return
 			}
 
-			poolBase := e.poolLabelValues(tenant, it)
-			poolNodeID := "pool:" + it.Config.UUID
-			mi := avi.ParseMarkers(it.Config.Markers)
-			chain := chainFor(mi, it.Config.Name)
-
+			membersMu.Lock()
 			for _, s := range servers {
-				memberLbl := e.appendPoolMemberLabels(poolBase, s.IPAddr.Addr, strconv.Itoa(s.Port))
-				up := 0.0
-				if s.OperStatus.State == "OPER_UP" {
-					up = 1
-				}
-				e.poolMemberOperUp.WithLabelValues(memberLbl...).Set(up)
-				e.emitOperStatusInfo(e.poolMemberOperStatusInfo, memberLbl, s.OperStatus.State)
-
-				// Topology poolmember node + pool→poolmember edge.
-				if !e.cfg.IsModuleDisabled("topology") {
-					memberID := "poolmember:" + s.IPAddr.Addr + ":" + strconv.Itoa(s.Port)
-					memberTitle := s.IPAddr.Addr + ":" + strconv.Itoa(s.Port)
-					memberState, memberValue, memberColor := "DOWN", 0.0, "red"
-					if s.OperStatus.State == "OPER_UP" {
-						memberState, memberValue, memberColor = "UP", 1, "green"
-					}
-					nodeLabels := e.appendLabels(tenant, memberID, memberTitle, "", "poolmember", memberState, chain, "", "", memberColor)
-					e.topologyNode.WithLabelValues(nodeLabels...).Set(memberValue)
-
-					statsLabels := e.appendLabels(tenant, memberID, "poolmember", chain)
-					e.topologyNodeState.WithLabelValues(statsLabels...).Set(memberValue)
-
-					edgeID := poolNodeID + "->" + memberID
-					edgeLabels := e.appendLabels(tenant, edgeID, poolNodeID, memberID, chain, "")
-					e.topologyEdge.WithLabelValues(edgeLabels...).Set(1)
-				}
+				members = append(members, poolMemberSnapshot{Pool: it, Server: s})
 			}
+			membersMu.Unlock()
 		}()
 	}
 	wg.Wait()
 
-	if n := failed.Load(); n > 0 {
-		return fmt.Errorf("%d/%d pool detail calls failed; first error: %w", n, len(items), firstErr)
+	if err := ctx.Err(); err != nil {
+		return members, err
 	}
-	return nil
+	if n := failed.Load(); n > 0 {
+		return members, fmt.Errorf("%d/%d pool detail calls failed; first error: %w", n, len(items), firstErr)
+	}
+	return members, nil
+}
+
+func (e *Exporter) renderPoolMembers(tenant string, members []poolMemberSnapshot) {
+	for _, member := range members {
+		poolBase := e.poolLabelValues(tenant, member.Pool)
+		server := member.Server
+		memberLbl := e.appendPoolMemberLabels(poolBase, server.IPAddr.Addr, strconv.Itoa(server.Port))
+		up := 0.0
+		if server.OperStatus.State == "OPER_UP" {
+			up = 1
+		}
+		e.poolMemberOperUp.WithLabelValues(memberLbl...).Set(up)
+		e.emitOperStatusInfo(e.poolMemberOperStatusInfo, memberLbl, server.OperStatus.State)
+	}
+}
+
+func (e *Exporter) renderPoolMemberTopology(tenant string, members []poolMemberSnapshot) {
+	for _, member := range members {
+		pool := member.Pool
+		server := member.Server
+		poolNodeID := "pool:" + pool.Config.UUID
+		mi := avi.ParseMarkers(pool.Config.Markers)
+		chain := chainFor(mi, pool.Config.Name)
+
+		memberID := "poolmember:" + server.IPAddr.Addr + ":" + strconv.Itoa(server.Port)
+		memberTitle := server.IPAddr.Addr + ":" + strconv.Itoa(server.Port)
+		memberState, memberValue, memberColor := "DOWN", 0.0, "red"
+		if server.OperStatus.State == "OPER_UP" {
+			memberState, memberValue, memberColor = "UP", 1, "green"
+		}
+		nodeLabels := e.appendLabels(tenant, memberID, memberTitle, "", "poolmember", memberState, chain, "", "", memberColor)
+		e.topologyNode.WithLabelValues(nodeLabels...).Set(memberValue)
+
+		statsLabels := e.appendLabels(tenant, memberID, "poolmember", chain)
+		e.topologyNodeState.WithLabelValues(statsLabels...).Set(memberValue)
+
+		edgeID := poolNodeID + "->" + memberID
+		edgeLabels := e.appendLabels(tenant, edgeID, poolNodeID, memberID, chain, "")
+		e.topologyEdge.WithLabelValues(edgeLabels...).Set(1)
+	}
 }
 
 // errAnalyticsFailed wraps an analytics POST failure so callers can detect it
@@ -183,6 +217,9 @@ func (e *Exporter) collectPoolAnalytics(ctx context.Context, tenant string, item
 		}
 	}
 	if len(queries) == 0 {
+		e.cacheMu.Lock()
+		deleteTenantGaugeVecs(tenant, e.poolAnalyticsGaugeVecs()...)
+		e.cacheMu.Unlock()
 		return nil
 	}
 
@@ -196,6 +233,10 @@ func (e *Exporter) collectPoolAnalytics(ctx context.Context, tenant string, item
 	for _, it := range items {
 		byUUID[it.Config.UUID] = it
 	}
+
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	deleteTenantGaugeVecs(tenant, e.poolAnalyticsGaugeVecs()...)
 
 	// Join by response-map key first, falling back to header.entity_uuid
 	// so controllers that key by VS UUID still match through the
