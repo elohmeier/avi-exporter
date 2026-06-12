@@ -1,3 +1,4 @@
 /avi-exporter
 /dist/
+node_modules/
 *.test

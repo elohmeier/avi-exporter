@@ -1,5 +1,12 @@
 # Avi Load Balancer Exporter
 
+[![CI](https://github.com/elohmeier/avi-exporter/actions/workflows/ci.yml/badge.svg)](https://github.com/elohmeier/avi-exporter/actions/workflows/ci.yml)
+[![Release](https://github.com/elohmeier/avi-exporter/actions/workflows/release.yml/badge.svg)](https://github.com/elohmeier/avi-exporter/actions/workflows/release.yml)
+[![Go version](https://img.shields.io/github/go-mod/go-version/elohmeier/avi-exporter)](go.mod)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](#development)
+[![GitHub release](https://img.shields.io/github/v/release/elohmeier/avi-exporter?sort=semver)](https://github.com/elohmeier/avi-exporter/releases)
+[![GHCR](https://img.shields.io/badge/ghcr.io-elohmeier%2Favi--exporter-blue)](https://github.com/elohmeier/avi-exporter/pkgs/container/avi-exporter)
+
 Prometheus exporter for VMware NSX Advanced Load Balancer (formerly Avi
 Networks). Talks to the Avi Controller's REST API: inventory endpoints for
 current state/health and the analytics `metrics/collection` endpoint for
@@ -22,8 +29,9 @@ time-series counters.
   `ako-`), the `markers` field is parsed and `namespace`/`service`/`ingress`/
   `host` labels are populated automatically.
 - **Topology metrics** (`avi_topology_node`, `avi_topology_edge`) emit a
-  Grafana-node-graph-friendly view of `virtualservice → pool → pool member`,
-  with a `chain` label grouping all nodes belonging to the same AKO app.
+  Grafana-node-graph-friendly view of
+  `vsvip → virtualservice → (pool | poolgroup → pool) → poolmember`, with a
+  `chain` label grouping all nodes belonging to the same AKO app.
 
 ## Quick start
 
@@ -40,6 +48,10 @@ time-series counters.
 | `AVI_CA_FILE` | Path to a CA bundle for TLS verification | no |
 | `AVI_LABELS` | Base labels (`k=v,k=v`), merged with `-labels` | no |
 | `AVI_DISABLED_MODULES` | Base disabled modules, merged with `-disabled-modules` | no |
+
+Tenant selection defaults to `admin`. When `*` is present, the exporter
+discovers tenants from `/api/tenant`; any explicit tenant names are kept and
+merged with the discovered set.
 
 ### CLI flags
 
@@ -88,6 +100,20 @@ docker run -p 9290:9290 \
   ghcr.io/elohmeier/avi-exporter
 ```
 
+## Release automation
+
+Pushes to `main` run the release workflow after its test, vet, race, and
+GoReleaser config checks pass. Conventional Commits drive the next version
+(`fix` = patch, `feat` = minor, breaking changes = major). `semantic-release`
+creates the `vX.Y.Z` tag and GitHub release notes.
+
+When a release is created, GoReleaser attaches the Linux/macOS binaries and
+publishes the multi-arch container image to `ghcr.io/elohmeier/avi-exporter`
+with both the semver tag (`X.Y.Z`) and `latest`.
+
+Renovate is configured to keep Go modules, GitHub Actions, and npm release
+tooling current, grouped by ecosystem.
+
 ## Modules
 
 | Module | Description |
@@ -96,8 +122,8 @@ docker run -p 9290:9290 \
 | `controller_metrics` | Controller CPU, memory, disk, active virtual services, and backend server analytics |
 | `vs_inventory` | Per-VS oper_status, enabled, health_score, percent_ses_up |
 | `vs_metrics` | Per-VS L4/L7 client analytics (bandwidth, conns, 2xx/4xx/5xx, apdex, RTT) |
-| `pool_inventory` | Per-pool oper_status, health_score, num_servers (and per-member up/enabled) |
-| `pool_metrics` | Per-pool L4/L7 server analytics (RTT, latency, error rate) |
+| `pool_inventory` | Per-pool oper_status, enabled, health_score, server counts, alert level, and app-profile type |
+| `pool_metrics` | Per-pool L4/L7 server analytics (bandwidth, conns, RTT, latency, error responses, health status, uptime) |
 | `pool_members` | Per-server oper_status. Costs one extra API call per pool (`/api/pool/<uuid>/runtime/server/detail/`). |
 | `pool_group` | Pool group inventory + topology edges (vs → pool_group → pools). Catches SNI/HTTP-policy fan-out invisible to plain VS→pool edges. |
 | `se_inventory` | Per-SE oper_status, enabled, health_score, plus se_connected/bgp_peers_up/gateway_up/license_state/power_state/migrate_state/version. |
@@ -142,6 +168,7 @@ admin-disabled from genuinely broken.
 | `/health` | Backward-compatible liveness probe (always 200 OK) |
 | `/readyz` | Readiness probe; returns 503 when required cached module data is missing or stale |
 | `/debug/cache` | JSON cache/module freshness status |
+| `/` | Plain-text endpoint index |
 
 ## Auth & versioning notes
 
@@ -164,6 +191,16 @@ Avi aggregates analytics on a 5-minute boundary. The defaults (`step=300`,
 `limit=1`) return the latest 5-min average. The exporter refreshes its cache in
 the background and `/metrics` never calls Avi, but scraping faster than the cache
 and aggregation cadence still gives you no fresher controller data.
+
+## Development
+
+Run the full test suite with coverage:
+
+```bash
+go test ./... -cover
+```
+
+The repository currently maintains 100% statement coverage across all packages.
 
 ## License
 

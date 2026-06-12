@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "labels": ["dependencies"],
+  "minimumReleaseAge": "3 days",
+  "prConcurrentLimit": 5,
+  "semanticCommits": "enabled",
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "go dependencies"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "matchManagers": ["npm"],
+      "groupName": "release tooling"
+    }
+  ]
+}
