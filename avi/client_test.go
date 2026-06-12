@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -523,14 +524,16 @@ func TestInventoryWrappers(t *testing.T) {
 		case "/api/pool/wrapped/runtime/server/detail/":
 			_, _ = w.Write([]byte(`{"server":[{"ip_addr":{"addr":"10.0.0.2"},"port":443,"oper_status":{"state":"OPER_DOWN"}}]}`))
 		case "/api/pool/paged/runtime/server/detail/":
-			if got := r.URL.Query().Get("page_size"); got != "" && got != "200" {
+			if got := r.URL.Query().Get("page_size"); got != "200" {
 				t.Fatalf("pool detail page_size = %q", got)
 			}
 			if r.URL.Query().Get("page") == "2" {
 				_, _ = w.Write([]byte(`{"results":[{"ip_addr":{"addr":"10.0.0.4"},"port":8443,"oper_status":{"state":"OPER_DOWN"}}]}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"results":[{"ip_addr":{"addr":"10.0.0.3"},"port":8080,"oper_status":{"state":"OPER_UP"}}],"next":"/api/pool/paged/runtime/server/detail/?page=2"}`))
+			_, _ = w.Write([]byte(poolRuntimeDetailResults(200, 8080, "/api/pool/paged/runtime/server/detail/?page=2")))
+		case "/api/pool/lying-next/runtime/server/detail/":
+			_, _ = w.Write([]byte(`{"results":[{"ip_addr":{"addr":"10.0.0.5"},"port":9443,"oper_status":{"state":"OPER_UP"}}],"next":"/api/pool/lying-next/runtime/server/detail/?page=2"}`))
 		case "/api/pool/bad/runtime/server/detail/":
 			_, _ = w.Write([]byte(`"bad"`))
 		default:
@@ -578,12 +581,32 @@ func TestInventoryWrappers(t *testing.T) {
 	if items, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "wrapped"); err != nil || len(items) != 1 || items[0].Port != 443 {
 		t.Fatalf("GetPoolRuntimeDetail wrapped = %#v, %v", items, err)
 	}
-	if items, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "paged"); err != nil || len(items) != 2 || items[1].Port != 8443 {
+	if items, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "paged"); err != nil || len(items) != 201 || items[200].Port != 8443 {
 		t.Fatalf("GetPoolRuntimeDetail paged = %#v, %v", items, err)
+	}
+	if items, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "lying-next"); err != nil || len(items) != 1 || items[0].Port != 9443 {
+		t.Fatalf("GetPoolRuntimeDetail lying next = %#v, %v", items, err)
 	}
 	if _, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "bad"); err == nil {
 		t.Fatalf("GetPoolRuntimeDetail accepted invalid shape")
 	}
+}
+
+func poolRuntimeDetailResults(count, startPort int, next string) string {
+	var b strings.Builder
+	b.WriteString(`{"results":[`)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"ip_addr":{"addr":"10.0.1.%d"},"port":%d,"oper_status":{"state":"OPER_UP"}}`, i+1, startPort+i)
+	}
+	b.WriteByte(']')
+	if next != "" {
+		fmt.Fprintf(&b, `,"next":%q`, next)
+	}
+	b.WriteByte('}')
+	return b.String()
 }
 
 func requireInventoryQuery(t *testing.T, r *http.Request) {

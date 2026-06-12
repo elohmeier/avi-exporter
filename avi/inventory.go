@@ -9,6 +9,7 @@ import (
 )
 
 const defaultPageSize = 200
+const maxPoolRuntimeDetailPages = 100
 
 // listAll walks the page→next chain and appends results into out.
 // path is like "/api/vsinventory"; extra query params are merged.
@@ -111,7 +112,7 @@ func (c *Client) ListGslbServiceInventory(ctx context.Context, tenant string) ([
 func (c *Client) GetPoolRuntimeDetail(ctx context.Context, tenant, poolUUID string) ([]ServerRuntimeDetail, error) {
 	path := "/api/pool/" + poolUUID + "/runtime/server/detail/"
 	var raw json.RawMessage
-	if err := c.Get(ctx, path, &raw, RequestOptions{Tenant: tenant}); err != nil {
+	if err := c.Get(ctx, path, &raw, RequestOptions{Tenant: tenant, Query: pageQuery(1)}); err != nil {
 		return nil, err
 	}
 	if len(raw) == 0 || string(raw) == "null" {
@@ -125,7 +126,7 @@ func (c *Client) GetPoolRuntimeDetail(ctx context.Context, tenant, poolUUID stri
 
 	var page PageResp[ServerRuntimeDetail]
 	if err := json.Unmarshal(raw, &page); err == nil && (page.Results != nil || page.Next != nil || page.Count > 0) {
-		return listAll[ServerRuntimeDetail](ctx, c, path, tenant, nil)
+		return c.listPoolRuntimeDetailPages(ctx, path, tenant, page)
 	}
 
 	// Fall back to wrapped {server:[...]}.
@@ -134,4 +135,40 @@ func (c *Client) GetPoolRuntimeDetail(ctx context.Context, tenant, poolUUID stri
 		return nil, fmt.Errorf("unmarshal pool runtime detail (%s): %w", path, err)
 	}
 	return wrapped.Server, nil
+}
+
+func pageQuery(page int) url.Values {
+	q := url.Values{}
+	q.Set("page", strconv.Itoa(page))
+	q.Set("page_size", strconv.Itoa(defaultPageSize))
+	return q
+}
+
+func (c *Client) listPoolRuntimeDetailPages(ctx context.Context, path, tenant string, first PageResp[ServerRuntimeDetail]) ([]ServerRuntimeDetail, error) {
+	all := append([]ServerRuntimeDetail{}, first.Results...)
+	if poolRuntimeDetailDone(first, len(all)) {
+		return all, nil
+	}
+
+	for page := 2; page <= maxPoolRuntimeDetailPages; page++ {
+		var resp PageResp[ServerRuntimeDetail]
+		if err := c.Get(ctx, path, &resp, RequestOptions{Tenant: tenant, Query: pageQuery(page)}); err != nil {
+			return nil, fmt.Errorf("list %s page %d: %w", path, page, err)
+		}
+		all = append(all, resp.Results...)
+		if poolRuntimeDetailDone(resp, len(all)) {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("list %s exceeded %d pages", path, maxPoolRuntimeDetailPages)
+}
+
+func poolRuntimeDetailDone(resp PageResp[ServerRuntimeDetail], total int) bool {
+	if resp.Count > 0 && total >= resp.Count {
+		return true
+	}
+	if len(resp.Results) < defaultPageSize {
+		return true
+	}
+	return resp.Next == nil || *resp.Next == ""
 }
