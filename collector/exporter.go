@@ -221,6 +221,7 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 	poolLbl := append(append([]string{}, tenantBase...), "pool", "pool_uuid", "namespace", "service", "ingress", "host", "ako")
 	poolMemberLbl := append(append([]string{}, tenantBase...), "pool", "pool_uuid", "ip", "port", "namespace", "service", "ingress", "host", "ako")
 	seLbl := append(append([]string{}, base...), "se", "se_uuid")
+	seAnalyticsLbl := append(append([]string{}, tenantBase...), "se", "se_uuid")
 	pgLbl := append(append([]string{}, tenantBase...), "poolgroup", "poolgroup_uuid", "namespace", "service", "ingress", "host", "ako")
 	gslbLbl := append(append([]string{}, tenantBase...), "gslbservice", "gslbservice_uuid")
 	vipLbl := append(append([]string{}, tenantBase...), "vsvip", "vsvip_uuid", "vip_id", "ip", "namespace", "service", "ingress", "host", "ako")
@@ -372,19 +373,19 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		seEnableStateInfo: g("se_enable_state_info", "SE enable_state info (always 1)", withTrailing(seLbl, "enable_state")),
 
 		// SE analytics
-		seAvgCPUUsage:     g("se_avg_cpu_usage", "SE average CPU usage percent", seLbl),
-		seAvgMemUsage:     g("se_avg_mem_usage", "SE average memory usage percent", seLbl),
-		seAvgDiskUsage:    g("se_avg_disk_usage", "SE average disk usage percent", seLbl),
-		seAvgConnections:  g("se_avg_connections", "SE average active connections", seLbl),
-		seAvgConnDropped:  g("se_avg_connections_dropped", "SE average connections dropped", seLbl),
-		seAvgRxBytes:      g("se_if_avg_rx_bytes", "SE average rx bytes", seLbl),
-		seAvgTxBytes:      g("se_if_avg_tx_bytes", "SE average tx bytes", seLbl),
-		seAvgBandwidth:    g("se_if_avg_bandwidth_bps", "SE average bandwidth bits/s", seLbl),
-		seAvgConnMem:      g("se_avg_connection_mem_usage", "SE average connection-memory usage", seLbl),
-		sePctConnDropped:  g("se_pct_connections_dropped", "SE percent of connections dropped", seLbl),
-		sePktBufUsage:     g("se_avg_packet_buffer_usage", "SE average packet-buffer usage", seLbl),
-		sePersistTblUsage: g("se_avg_persistent_table_usage", "SE average persistence-table usage", seLbl),
-		seSslSessCache:    g("se_avg_ssl_session_cache_usage", "SE average SSL session-cache usage", seLbl),
+		seAvgCPUUsage:     g("se_avg_cpu_usage", "SE average CPU usage percent", seAnalyticsLbl),
+		seAvgMemUsage:     g("se_avg_mem_usage", "SE average memory usage percent", seAnalyticsLbl),
+		seAvgDiskUsage:    g("se_avg_disk_usage", "SE average disk usage percent", seAnalyticsLbl),
+		seAvgConnections:  g("se_avg_connections", "SE average active connections", seAnalyticsLbl),
+		seAvgConnDropped:  g("se_avg_connections_dropped", "SE average connections dropped", seAnalyticsLbl),
+		seAvgRxBytes:      g("se_if_avg_rx_bytes", "SE average rx bytes", seAnalyticsLbl),
+		seAvgTxBytes:      g("se_if_avg_tx_bytes", "SE average tx bytes", seAnalyticsLbl),
+		seAvgBandwidth:    g("se_if_avg_bandwidth_bps", "SE average bandwidth bits/s", seAnalyticsLbl),
+		seAvgConnMem:      g("se_avg_connection_mem_usage", "SE average connection-memory usage", seAnalyticsLbl),
+		sePctConnDropped:  g("se_pct_connections_dropped", "SE percent of connections dropped", seAnalyticsLbl),
+		sePktBufUsage:     g("se_avg_packet_buffer_usage", "SE average packet-buffer usage", seAnalyticsLbl),
+		sePersistTblUsage: g("se_avg_persistent_table_usage", "SE average persistence-table usage", seAnalyticsLbl),
+		seSslSessCache:    g("se_avg_ssl_session_cache_usage", "SE average SSL session-cache usage", seAnalyticsLbl),
 
 		// VsVip
 		vipOperUp:          g("vip_oper_up", "1 if VIP oper_status is OPER_UP", vipLbl),
@@ -434,7 +435,7 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		"l4_server.avg_health_status":   e.poolAvgHealthStatus,
 		"l4_server.avg_uptime":          e.poolAvgUptime,
 	})
-	e.seAnalyticsGauges = buildAnalyticsGaugeMap(g, "", seLbl, seMetricIDs, map[string]*prometheus.GaugeVec{
+	e.seAnalyticsGauges = buildAnalyticsGaugeMap(g, "", seAnalyticsLbl, seMetricIDs, map[string]*prometheus.GaugeVec{
 		"se_stats.avg_cpu_usage":               e.seAvgCPUUsage,
 		"se_stats.avg_mem_usage":               e.seAvgMemUsage,
 		"se_stats.avg_disk1_usage":             e.seAvgDiskUsage,

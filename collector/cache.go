@@ -145,6 +145,10 @@ func (e *Exporter) RefreshOnce(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 
+	if err := e.refreshAdminVSAnalytics(ctx, tenants); err != nil {
+		errs = append(errs, err)
+	}
+
 	if err := e.refreshTenantSet(ctx, tenants); err != nil {
 		errs = append(errs, err)
 	}
@@ -366,6 +370,38 @@ func (e *Exporter) refreshServiceEngines(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (e *Exporter) refreshAdminVSAnalytics(ctx context.Context, tenants []string) error {
+	if !e.shouldCollectAdminVSAnalytics(tenants) {
+		return nil
+	}
+	return e.runModule(ctx, "admin_vs_metrics", "admin", func(ctx context.Context) error {
+		return e.collectRawVSAnalytics(ctx, []string{"admin"})
+	})
+}
+
+func (e *Exporter) shouldCollectAdminVSAnalytics(tenants []string) bool {
+	if e.cfg.IsModuleDisabled("vs_metrics") || e.cfg.IsModuleDisabled("admin_vs_metrics") {
+		return false
+	}
+	_, wildcard := e.configuredTenants()
+	if !wildcard {
+		return false
+	}
+	if len(tenants) == 0 {
+		return false
+	}
+	return !tenantListContains(tenants, "admin")
+}
+
+func tenantListContains(tenants []string, want string) bool {
+	for _, tenant := range tenants {
+		if tenant == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Exporter) refreshTenantSet(ctx context.Context, tenants []string) error {
@@ -660,7 +696,7 @@ func policyForModule(module string) modulePolicy {
 	case "tenant_discovery":
 		policy.timeout = 60 * time.Second
 		policy.maxStale = 30 * time.Minute
-	case "vs_metrics", "pool_metrics", "se_metrics", "controller_metrics":
+	case "vs_metrics", "admin_vs_metrics", "pool_metrics", "se_metrics", "controller_metrics":
 		policy.timeout = 90 * time.Second
 		policy.maxStale = 15 * time.Minute
 	case "pool_members":
@@ -710,6 +746,9 @@ func (e *Exporter) requiredModuleKeysLocked() []moduleKey {
 	}
 	if !e.cfg.IsModuleDisabled("se_metrics") {
 		add("se_metrics", "")
+	}
+	if e.shouldCollectAdminVSAnalytics(e.expectedTenantsLocked()) {
+		add("admin_vs_metrics", "admin")
 	}
 
 	for _, tenant := range e.expectedTenantsLocked() {

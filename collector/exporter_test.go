@@ -364,7 +364,7 @@ func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 			if got := r.Header.Get("X-Avi-Tenant"); got != "" {
 				t.Fatalf("SE prometheus endpoint tenant header = %q, want empty", got)
 			}
-			if got := r.URL.Query().Get("tenant"); got != "admin,OCP-ENTW-BU" {
+			if got := r.URL.Query().Get("tenant"); got != "admin,tenant-alpha" {
 				t.Fatalf("SE prometheus endpoint tenant query = %q", got)
 			}
 			metricID := r.URL.Query().Get("metric_id")
@@ -376,10 +376,10 @@ func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 			switch metricID {
 			case "se_stats.avg_cpu_usage":
 				_, _ = fmt.Fprintln(w, "# Successfully gathered 1 metrics for serviceengine")
-				_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 3.5`)
+				_, _ = fmt.Fprintln(w, `avi_se_stats_avg_cpu_usage{uuid="se-1",type="serviceengine",tenant="tenant-alpha",name="se-one"} 3.5`)
 			case "se_if.avg_bandwidth":
 				_, _ = fmt.Fprintln(w, "# Successfully gathered 1 metrics for serviceengine")
-				_, _ = fmt.Fprintln(w, `avi_se_if_avg_bandwidth{uuid="se-1",type="serviceengine",tenant="OCP-ENTW-BU",name="se-one"} 42`)
+				_, _ = fmt.Fprintln(w, `avi_se_if_avg_bandwidth{uuid="se-1",type="serviceengine",tenant="tenant-alpha",name="se-one"} 42`)
 			case "se_stats.avg_mem_usage":
 				_, _ = fmt.Fprintln(w, "# Successfully gathered 1 metrics for serviceengine")
 				_, _ = fmt.Fprintln(w, `avi_se_stats_avg_mem_usage{uuid="se-2",type="serviceengine",tenant="admin",name="se-two"} 7`)
@@ -392,7 +392,7 @@ func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 	})
 	defer controller.Close()
 
-	cfg := testConfig([]string{"OCP-ENTW-BU"}, []string{
+	cfg := testConfig([]string{"tenant-alpha"}, []string{
 		"cluster", "controller_metrics",
 		"vs_inventory", "vs_metrics",
 		"pool_inventory", "pool_metrics", "pool_members",
@@ -420,14 +420,61 @@ func TestSEMetricsDoNotRequireSEInventory(t *testing.T) {
 	}
 
 	mfs := gatherRegisteredExporter(t, exp)
-	if got := metricValueForLabel(t, metricFamily(t, mfs, "avi_se_avg_cpu_usage"), "se", "se-one"); got != 3.5 {
+	if got := metricValueForLabels(t, metricFamily(t, mfs, "avi_se_avg_cpu_usage"), map[string]string{"tenant": "tenant-alpha", "se": "se-one"}); got != 3.5 {
 		t.Fatalf("avi_se_avg_cpu_usage for se-one = %v, want 3.5", got)
 	}
-	if got := metricValueForLabel(t, metricFamily(t, mfs, "avi_se_if_avg_bandwidth_bps"), "se", "se-one"); got != 42 {
+	if got := metricValueForLabels(t, metricFamily(t, mfs, "avi_se_if_avg_bandwidth_bps"), map[string]string{"tenant": "tenant-alpha", "se": "se-one"}); got != 42 {
 		t.Fatalf("avi_se_if_avg_bandwidth_bps for se-one = %v, want 42", got)
 	}
-	if got := metricValueForLabel(t, metricFamily(t, mfs, "avi_se_avg_mem_usage"), "se", "se-two"); got != 7 {
+	if got := metricValueForLabels(t, metricFamily(t, mfs, "avi_se_avg_mem_usage"), map[string]string{"tenant": "admin", "se": "se-two"}); got != 7 {
 		t.Fatalf("avi_se_avg_mem_usage for se-two = %v, want 7", got)
+	}
+}
+
+func TestRawAdminVSAnalyticsDoesNotRequireInventory(t *testing.T) {
+	var calls atomic.Int64
+	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/analytics/prometheus-metrics/virtualservice" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		if got := r.Header.Get("X-Avi-Tenant"); got != "" {
+			t.Fatalf("raw VS prometheus endpoint tenant header = %q, want empty", got)
+		}
+		if got := r.URL.Query().Get("tenant"); got != "admin" {
+			t.Fatalf("raw VS prometheus endpoint tenant query = %q, want admin", got)
+		}
+		metricID := r.URL.Query().Get("metric_id")
+		w.Header().Set("Content-Type", "text/plain")
+		if strings.Contains(metricID, "dns_client.avg_complete_queries") {
+			_, _ = fmt.Fprintln(w, `avi_dns_client_avg_complete_queries{uuid="vs-admin",type="virtualservice",tenant="admin",name="admin-dns"} 456`)
+		}
+		if strings.Contains(metricID, "l7_server.avg_resp_latency") {
+			_, _ = fmt.Fprintln(w, `avi_l7_server_avg_resp_latency{uuid="vs-admin",type="virtualservice",tenant="admin",name="admin-dns"} 12`)
+		}
+	})
+	defer controller.Close()
+
+	exp, err := NewExporter(testConfig([]string{"tenant-alpha"}, nil), controller.URL, "user", "pass", true, "", 1, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := exp.collectRawVSAnalytics(context.Background(), []string{"admin"}); err != nil {
+		t.Fatalf("collectRawVSAnalytics: %v", err)
+	}
+	if got := calls.Load(); got == 0 {
+		t.Fatalf("raw VS prometheus endpoint was not called")
+	}
+
+	mfs := gatherRegisteredExporter(t, exp)
+	dns := metricFamily(t, mfs, "avi_vs_dns_client_avg_complete_queries")
+	if got := metricValueForLabels(t, dns, map[string]string{"tenant": "admin", "vs": "admin-dns", "vs_uuid": "vs-admin"}); got != 456 {
+		t.Fatalf("admin DNS VS metric = %v, want 456", got)
+	}
+	latency := metricFamily(t, mfs, "avi_vs_l7_server_avg_resp_latency_ms")
+	if got := metricValueForLabels(t, latency, map[string]string{"tenant": "admin", "vs": "admin-dns", "vs_uuid": "vs-admin"}); got != 12 {
+		t.Fatalf("admin l7 server VS metric = %v, want 12", got)
 	}
 }
 
@@ -965,6 +1012,28 @@ func metricValueForLabel(t *testing.T, mf *dto.MetricFamily, labelName, labelVal
 		}
 	}
 	t.Fatalf("metric %q with %s=%q not found", mf.GetName(), labelName, labelValue)
+	return 0
+}
+
+func metricValueForLabels(t *testing.T, mf *dto.MetricFamily, labels map[string]string) float64 {
+	t.Helper()
+	for _, m := range mf.Metric {
+		have := make(map[string]string, len(m.Label))
+		for _, l := range m.Label {
+			have[l.GetName()] = l.GetValue()
+		}
+		matches := true
+		for name, value := range labels {
+			if have[name] != value {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return m.GetGauge().GetValue()
+		}
+	}
+	t.Fatalf("metric %q with labels %#v not found", mf.GetName(), labels)
 	return 0
 }
 

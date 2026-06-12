@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/elohmeier/avi-exporter/avi"
 )
@@ -211,6 +212,62 @@ func (e *Exporter) collectVSAnalytics(ctx context.Context, tenant string, items 
 	}
 
 	return nil
+}
+
+func (e *Exporter) collectRawVSAnalytics(ctx context.Context, tenants []string) error {
+	families, err := e.collectBuiltinPrometheusMetrics(ctx, "virtualservice", tenants, vsMetricIDs)
+	if err != nil {
+		e.logger.Error("collect raw VS metrics", "tenants", tenants, "err", err)
+		return fmt.Errorf("%w: %v", errAnalyticsFailed, err)
+	}
+
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	for _, tenant := range tenants {
+		deleteTenantGaugeVecs(tenant, e.vsAnalyticsGaugeVecs()...)
+	}
+	fallbackTenant := ""
+	if len(tenants) == 1 {
+		fallbackTenant = tenants[0]
+	}
+	e.renderRawVSAnalyticsLocked(families, fallbackTenant)
+	return nil
+}
+
+func (e *Exporter) renderRawVSAnalyticsLocked(families map[string]*dto.MetricFamily, fallbackTenant string) {
+	for familyName, family := range families {
+		gauge := e.vsGaugeFor(familyName)
+		if gauge == nil {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			value, ok := prometheusMetricValue(metric)
+			if !ok {
+				continue
+			}
+			uuid := prometheusLabelValue(metric, "uuid")
+			name := prometheusLabelValue(metric, "name")
+			if uuid == "" && name == "" {
+				continue
+			}
+			if name == "" {
+				name = uuid
+			}
+			tenant := prometheusLabelValue(metric, "tenant")
+			if tenant == "" {
+				tenant = fallbackTenant
+			}
+			gauge.WithLabelValues(e.rawVSAnalyticsLabelValues(
+				tenant,
+				name,
+				uuid,
+			)...).Set(value)
+		}
+	}
+}
+
+func (e *Exporter) rawVSAnalyticsLabelValues(tenant, name, uuid string) []string {
+	return e.appendLabels(tenant, name, uuid, "", "", "", "", "false")
 }
 
 func (e *Exporter) vsGaugeFor(metricID string) *prometheus.GaugeVec {

@@ -124,6 +124,7 @@ tooling current, grouped by ecosystem.
 | `controller_metrics` | Controller CPU, memory, disk, active virtual services, and backend server analytics |
 | `vs_inventory` | Per-VS oper_status, enabled, health_score, percent_ses_up |
 | `vs_metrics` | Per-VS DNS, L4 client/server, L7 client/server, SSL, WAF, response-code, latency, and health-score analytics |
+| `admin_vs_metrics` | Raw admin-tenant VS analytics for wildcard tenant discovery when admin inventory is not scraped |
 | `pool_inventory` | Per-pool oper_status, enabled, health_score, server counts, alert level, and app-profile type |
 | `pool_metrics` | Per-pool L4/L7 server, Apdex, packet/byte, connection, response-code, latency, and health-score analytics |
 | `pool_members` | Per-server oper_status. Costs one extra API call per pool (`/api/pool/<uuid>/runtime/server/detail/`). |

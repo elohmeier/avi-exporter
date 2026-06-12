@@ -115,7 +115,7 @@ func (e *Exporter) collectSEAnalytics(ctx context.Context, items []avi.SEInvento
 			if name == "" {
 				name = uuid
 			}
-			g.WithLabelValues(e.appendLabels(name, uuid)...).Set(value)
+			g.WithLabelValues(e.appendLabels(prometheusLabelValue(metric, "tenant"), name, uuid)...).Set(value)
 		}
 	}
 
