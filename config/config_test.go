@@ -98,3 +98,36 @@ func TestParseCSV(t *testing.T) {
 		t.Fatalf("ParseCSV() = %#v, want %#v", got, want)
 	}
 }
+
+func TestValidateLabels(t *testing.T) {
+	if err := ValidateLabels(map[string]string{"env": "prod", "site_1": "eu"}, []string{"tenant"}); err != nil {
+		t.Fatalf("ValidateLabels(valid) = %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		reserved []string
+	}{
+		{
+			name:   "invalid name",
+			labels: map[string]string{"bad-label": "value"},
+		},
+		{
+			name:   "prometheus reserved prefix",
+			labels: map[string]string{"__name__": "value"},
+		},
+		{
+			name:     "exporter reserved label",
+			labels:   map[string]string{"tenant": "override"},
+			reserved: []string{"tenant"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateLabels(tt.labels, tt.reserved); err == nil {
+				t.Fatalf("ValidateLabels(%s) succeeded, want error", tt.name)
+			}
+		})
+	}
+}

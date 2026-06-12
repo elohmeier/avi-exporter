@@ -1,10 +1,14 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var validLabelName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Config holds the exporter configuration.
 type Config struct {
@@ -34,6 +38,34 @@ func (c *Config) LabelKeys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// ValidateLabels returns an error when custom labels are not valid Prometheus
+// label names or would collide with exporter-managed labels.
+func ValidateLabels(labels map[string]string, reserved []string) error {
+	reservedSet := make(map[string]bool, len(reserved))
+	for _, label := range reserved {
+		reservedSet[label] = true
+	}
+
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		if !validLabelName.MatchString(key) {
+			return fmt.Errorf("invalid label %q: label names must match [A-Za-z_][A-Za-z0-9_]*", key)
+		}
+		if strings.HasPrefix(key, "__") {
+			return fmt.Errorf("invalid label %q: label names starting with __ are reserved", key)
+		}
+		if reservedSet[key] {
+			return fmt.Errorf("invalid label %q: reserved exporter label", key)
+		}
+	}
+	return nil
 }
 
 // GetCredentials reads credentials from environment variables.

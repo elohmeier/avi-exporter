@@ -106,7 +106,11 @@ func (e *Exporter) collectVsVipInventory(ctx context.Context, tenant string, ite
 					if se.ActiveOnSe != nil && *se.ActiveOnSe {
 						active = 1
 					}
-					placement := e.vipPlacementLabelValues(tenant, it, v.VipID, se.Name, avi.RefUUID(se.URL), primary)
+					seUUID := se.UUID
+					if seUUID == "" {
+						seUUID = avi.RefUUID(se.URL)
+					}
+					placement := e.vipPlacementLabelValues(tenant, it, v.VipID, se.Name, seUUID, primary)
 					e.vipActiveOnSe.WithLabelValues(placement...).Set(active)
 				}
 			}

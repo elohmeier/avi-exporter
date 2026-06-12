@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,6 +53,17 @@ func TestRunVersionAndFlagParse(t *testing.T) {
 	}
 }
 
+func TestDockerfileIncludesSystemCARoots(t *testing.T) {
+	raw, err := os.ReadFile("Dockerfile")
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	dockerfile := string(raw)
+	if !strings.Contains(dockerfile, "ca-certificates.crt") || !strings.Contains(dockerfile, "COPY --from=") {
+		t.Fatalf("Dockerfile does not copy system CA roots into final image:\n%s", dockerfile)
+	}
+}
+
 func TestRunValidationErrors(t *testing.T) {
 	clearMainEnv(t)
 	var out, stderr bytes.Buffer
@@ -79,6 +91,64 @@ func TestRunValidationErrors(t *testing.T) {
 	if code := run([]string{"-parallelism", "0"}, &out, &stderr, nil); code != 1 {
 		t.Fatalf("run invalid exporter code = %d, want 1", code)
 	}
+
+	clearMainEnv(t)
+	t.Setenv("AVI_URL", "https://controller.example")
+	t.Setenv("AVI_USERNAME", "user")
+	t.Setenv("AVI_PASSWORD", "")
+	out.Reset()
+	stderr.Reset()
+	served := false
+	if code := run([]string{"-disabled-modules", allModulesCSV}, &out, &stderr, func(*http.Server) error {
+		served = true
+		return nil
+	}); code != 1 {
+		t.Fatalf("run without password code = %d, want 1", code)
+	}
+	if served {
+		t.Fatalf("run started server without password")
+	}
+}
+
+func TestRunRejectsInvalidCustomLabels(t *testing.T) {
+	for _, labels := range []string{"tenant=override", "bad-label=value"} {
+		t.Run(labels, func(t *testing.T) {
+			clearMainEnv(t)
+			t.Setenv("AVI_URL", "https://controller.example")
+			t.Setenv("AVI_USERNAME", "user")
+			t.Setenv("AVI_PASSWORD", "pass")
+
+			var out, stderr bytes.Buffer
+			served := false
+			code, panicValue := runCatchingPanic([]string{
+				"-labels", labels,
+				"-disabled-modules", allModulesCSV,
+			}, &out, &stderr, func(*http.Server) error {
+				served = true
+				return nil
+			})
+			if panicValue != nil {
+				t.Fatalf("run panicked for labels %q: %v", labels, panicValue)
+			}
+			if code != 1 {
+				t.Fatalf("run with labels %q code = %d, want 1", labels, code)
+			}
+			if served {
+				t.Fatalf("run started server with invalid labels %q", labels)
+			}
+			if !strings.Contains(out.String(), "invalid label") {
+				t.Fatalf("invalid label log missing for %q: stdout=%q stderr=%q", labels, out.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func runCatchingPanic(args []string, stdout, stderr io.Writer, serve func(*http.Server) error) (code int, panicValue any) {
+	defer func() {
+		panicValue = recover()
+	}()
+	code = run(args, stdout, stderr, serve)
+	return code, nil
 }
 
 func TestRunStartsServerAndHandlers(t *testing.T) {

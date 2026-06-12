@@ -28,6 +28,55 @@ var (
 	}
 )
 
+var reservedCustomLabelNames = []string{
+	"ako",
+	"app_profile_type",
+	"chain",
+	"color",
+	"controller_uuid",
+	"enable_state",
+	"fqdn",
+	"gslbservice",
+	"gslbservice_uuid",
+	"host",
+	"id",
+	"ingress",
+	"ip",
+	"license_state",
+	"level",
+	"mainstat",
+	"module",
+	"migrate_state",
+	"node",
+	"node_type",
+	"namespace",
+	"pool",
+	"pool_uuid",
+	"poolgroup",
+	"poolgroup_uuid",
+	"port",
+	"power_state",
+	"primary",
+	"se",
+	"se_uuid",
+	"secondarystat",
+	"service",
+	"source",
+	"state",
+	"subtitle",
+	"target",
+	"tenant",
+	"title",
+	"ttl",
+	"type",
+	"version",
+	"vip_id",
+	"vs",
+	"vs_uuid",
+	"vsvip",
+	"vsvip_uuid",
+}
+
 func main() {
 	exitProcess(run(os.Args[1:], os.Stdout, os.Stderr, serveHTTP))
 }
@@ -107,6 +156,10 @@ func run(args []string, stdout, stderr io.Writer, serve func(*http.Server) error
 	for k, v := range cliLabels {
 		labels[k] = v
 	}
+	if err := config.ValidateLabels(labels, reservedCustomLabelNames); err != nil {
+		logger.Error("invalid label configuration", "err", err)
+		return 1
+	}
 
 	envDisabled := config.ParseCSV(config.GetDisabledModules())
 	cliDisabled := config.ParseCSV(disabledModules)
@@ -129,7 +182,7 @@ func run(args []string, stdout, stderr io.Writer, serve func(*http.Server) error
 	}
 
 	username, password := config.GetCredentials()
-	if username == "" {
+	if username == "" || password == "" {
 		logger.Error("credentials are required (set AVI_USERNAME and AVI_PASSWORD)")
 		return 1
 	}

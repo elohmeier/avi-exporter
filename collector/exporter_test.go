@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
+	"github.com/elohmeier/avi-exporter/avi"
 	"github.com/elohmeier/avi-exporter/config"
 )
 
@@ -730,6 +731,107 @@ func TestWildcardTenantRefreshUsesLoginTenants(t *testing.T) {
 	}
 	if !reflect.DeepEqual(seen, map[string]int{"tenant-a": 1, "tenant-b": 1}) {
 		t.Fatalf("refreshed tenants = %#v, want tenant-a and tenant-b", seen)
+	}
+}
+
+func TestVsVipPlacementUsesServiceEngineUUIDWhenURLMissing(t *testing.T) {
+	controller := newFakeController(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/vsvip-inventory" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(t, w, map[string]any{
+			"results": []map[string]any{
+				{
+					"config": map[string]any{
+						"uuid": "vsvip-a",
+						"name": "vsvip-a",
+						"vip": []map[string]any{
+							{
+								"vip_id":     "1",
+								"enabled":    true,
+								"ip_address": map[string]any{"addr": "192.0.2.10", "type": "V4"},
+							},
+						},
+					},
+					"runtime": []map[string]any{
+						{
+							"vip_id":      "1",
+							"oper_status": map[string]any{"state": "OPER_UP"},
+							"service_engine": []map[string]any{
+								{"name": "se-a", "uuid": "se-a", "active_on_se": true},
+							},
+						},
+					},
+				},
+			},
+		})
+	})
+	defer controller.Close()
+
+	cfg := testConfig([]string{"admin"}, []string{
+		"cluster", "controller_metrics",
+		"se_inventory", "se_metrics",
+		"vs_inventory", "vs_metrics",
+		"pool_inventory", "pool_metrics", "pool_members",
+		"pool_group", "gslb", "topology",
+	})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	exp, err := NewExporter(cfg, controller.URL, "user", "pass", true, "", 1, logger)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+	if err := exp.RefreshOnce(context.Background()); err != nil {
+		t.Fatalf("RefreshOnce: %v", err)
+	}
+
+	placements := metricFamily(t, gatherRegisteredExporter(t, exp), "avi_vip_active_on_se")
+	if got := countMetricsWithLabel(placements, "se_uuid", "se-a"); got != 1 {
+		t.Fatalf("vip placement metrics with se_uuid=se-a = %d, want 1", got)
+	}
+}
+
+func TestVsVipPlacementFallsBackToServiceEngineURL(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	exp, err := NewExporter(testConfig([]string{"admin"}, nil), "https://controller.example", "user", "pass", true, "", 1, logger)
+	if err != nil {
+		t.Fatalf("NewExporter: %v", err)
+	}
+
+	enabled := true
+	active := true
+	exp.collectVsVipInventory(context.Background(), "admin", []avi.VsVipInventoryItem{
+		{
+			Config: avi.VsVipConfig{
+				UUID: "vsvip-b",
+				Name: "vsvip-b",
+				Vip: []avi.Vip{
+					{
+						VipID:     "1",
+						Enabled:   &enabled,
+						IPAddress: &avi.IPAddr{Addr: "192.0.2.11", Type: "V4"},
+					},
+				},
+			},
+			Runtime: []avi.VsVipRuntime{
+				{
+					VipID:      "1",
+					OperStatus: avi.OperStatus{State: "OPER_UP"},
+					ServiceEngine: []avi.VipSeAssigned{
+						{
+							Name:       "se-b",
+							URL:        "https://controller.example/api/serviceengine/se-b#se-b",
+							ActiveOnSe: &active,
+						},
+					},
+				},
+			},
+		},
+	}, nil)
+
+	placements := metricFamily(t, gatherRegisteredExporter(t, exp), "avi_vip_active_on_se")
+	if got := countMetricsWithLabel(placements, "se_uuid", "se-b"); got != 1 {
+		t.Fatalf("vip placement metrics with se_uuid=se-b = %d, want 1", got)
 	}
 }
 
