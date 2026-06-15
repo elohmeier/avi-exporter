@@ -40,14 +40,24 @@ jobs:
       - name: Install release tooling
         run: npm ci --ignore-scripts
 
-      - name: Test
-        run: go test ./... -cover
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "$files"
+            exit 1
+          fi
 
-      - name: Vet
-        run: go vet ./...
+      - name: Check module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
 
-      - name: Race tests
-        run: go test -race ./...
+      - name: Verify
+        run: |
+          go vet ./...
+          go test ./... -race -covermode=atomic -coverprofile=coverage.out
+          go build ./...
 
       - name: Check GoReleaser config
         uses: goreleaser/goreleaser-action@v7
