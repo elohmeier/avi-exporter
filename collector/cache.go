@@ -133,6 +133,14 @@ func (e *Exporter) RefreshOnce(ctx context.Context) error {
 		}
 	}
 
+	if !e.cfg.IsModuleDisabled("cluster_inventory") {
+		if err := e.runModule(ctx, "cluster_inventory", "", func(ctx context.Context) error {
+			return e.refreshClusterInventory(ctx)
+		}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	if !e.cfg.IsModuleDisabled("controller_metrics") {
 		if err := e.runModule(ctx, "controller_metrics", "", func(ctx context.Context) error {
 			return e.collectControllerAnalytics(ctx)
@@ -335,11 +343,19 @@ func (e *Exporter) refreshCluster(ctx context.Context) error {
 }
 
 func (e *Exporter) refreshServiceEngines(ctx context.Context) error {
-	if e.cfg.IsModuleDisabled("se_inventory") && e.cfg.IsModuleDisabled("se_metrics") {
-		return nil
+	var errs []error
+	if !e.cfg.IsModuleDisabled("se_config") {
+		if err := e.runModule(ctx, "se_config", "", func(ctx context.Context) error {
+			return e.refreshSEConfig(ctx)
+		}); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	var errs []error
+	if e.cfg.IsModuleDisabled("se_inventory") && e.cfg.IsModuleDisabled("se_metrics") {
+		return errors.Join(errs...)
+	}
+
 	var seItems []avi.SEInventoryItem
 	if !e.cfg.IsModuleDisabled("se_inventory") {
 		if err := e.runModule(ctx, "se_list", "", func(ctx context.Context) error {
@@ -735,6 +751,9 @@ func (e *Exporter) requiredModuleKeysLocked() []moduleKey {
 	if !e.cfg.IsModuleDisabled("cluster") {
 		add("cluster", "")
 	}
+	if !e.cfg.IsModuleDisabled("cluster_inventory") {
+		add("cluster_inventory", "")
+	}
 	if !e.cfg.IsModuleDisabled("controller_metrics") {
 		add("controller_metrics", "")
 	}
@@ -743,6 +762,9 @@ func (e *Exporter) requiredModuleKeysLocked() []moduleKey {
 	}
 	if !e.cfg.IsModuleDisabled("se_inventory") {
 		add("se_inventory", "")
+	}
+	if !e.cfg.IsModuleDisabled("se_config") {
+		add("se_config", "")
 	}
 	if !e.cfg.IsModuleDisabled("se_metrics") {
 		add("se_metrics", "")

@@ -522,7 +522,7 @@ func TestInventoryWrappers(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"cluster_state":{"state":"CLUSTER_UP_NO_HA","progress":100},"node_states":[{"name":"node-a","state":"CLUSTER_ACTIVE","role":"CLUSTER_LEADER"}]}`))
 		case "/api/cluster":
-			_, _ = w.Write([]byte(`{"uuid":"cluster-1","name":"cluster","nodes":[{"name":"node-a"}]}`))
+			_, _ = w.Write([]byte(`{"uuid":"cluster-1","name":"cluster","nodes":[{"name":"node-a","ip":{"addr":"192.0.2.10","type":"V4"},"ip6":{"addr":"2001:db8::10","type":"V6"},"public_ip_or_name":{"addr":"controller.example.com"},"vm_hostname":"controller-a","vm_name":"avi-controller-a","vm_uuid":"vm-1"}]}`))
 		case "/api/virtualservice-inventory":
 			requireInventoryQuery(t, r)
 			_, _ = w.Write([]byte(`{"results":[{"config":{"uuid":"vs-1","name":"vs-1"},"runtime":{"oper_status":{"state":"OPER_UP"}}}]}`))
@@ -551,6 +551,20 @@ func TestInventoryWrappers(t *testing.T) {
 				t.Fatalf("SE inventory tenant = %q", got)
 			}
 			_, _ = w.Write([]byte(`{"results":[{"config":{"uuid":"se-1","name":"se-1"},"runtime":{"oper_status":{"state":"OPER_UP"}}}]}`))
+		case "/api/serviceengine":
+			if got := r.Header.Get("X-Avi-Tenant"); got != "admin" {
+				t.Fatalf("SE config tenant = %q", got)
+			}
+			if got := r.URL.Query().Get("include_name"); got != "true" {
+				t.Fatalf("SE config include_name = %q", got)
+			}
+			fields := r.URL.Query().Get("fields")
+			for _, field := range []string{"cloud_ref", "mgmt_vnic", "data_vnics"} {
+				if !strings.Contains(fields, field) {
+					t.Fatalf("SE config fields %q omit %q", fields, field)
+				}
+			}
+			_, _ = w.Write([]byte(`{"results":[{"uuid":"se-1","name":"se-1","cloud_ref":"https://controller/api/cloud/cloud-1#cloud-a","mgmt_vnic":{"if_name":"Management","vnic_networks":[{"ip":{"ip_addr":{"addr":"192.0.2.20","type":"V4"},"mask":24}}]}}]}`))
 		case "/api/vsvip-inventory":
 			requireInventoryQuery(t, r)
 			_, _ = w.Write([]byte(`{"results":[{"config":{"uuid":"vip-1","name":"vip-1"},"runtime":null}]}`))
@@ -596,7 +610,7 @@ func TestInventoryWrappers(t *testing.T) {
 	if rt, err := client.GetClusterRuntime(context.Background()); err != nil || rt.ClusterState.Progress != 100 {
 		t.Fatalf("GetClusterRuntime = %#v, %v", rt, err)
 	}
-	if cluster, err := client.GetCluster(context.Background()); err != nil || cluster.UUID != "cluster-1" {
+	if cluster, err := client.GetCluster(context.Background()); err != nil || cluster.UUID != "cluster-1" || cluster.Nodes[0].VMUUID != "vm-1" || cluster.Nodes[0].IP6.Addr != "2001:db8::10" {
 		t.Fatalf("GetCluster = %#v, %v", cluster, err)
 	}
 	if items, err := client.ListVSInventory(context.Background(), "tenant-a"); err != nil || len(items) != 1 {
@@ -613,6 +627,9 @@ func TestInventoryWrappers(t *testing.T) {
 	}
 	if items, err := client.ListSEInventory(context.Background()); err != nil || len(items) != 1 {
 		t.Fatalf("ListSEInventory = %d, %v", len(items), err)
+	}
+	if items, err := client.ListSEConfig(context.Background()); err != nil || len(items) != 1 || items[0].MgmtVNIC == nil || items[0].MgmtVNIC.VNICNetworks[0].IP.Mask == nil || *items[0].MgmtVNIC.VNICNetworks[0].IP.Mask != 24 {
+		t.Fatalf("ListSEConfig = %#v, %v", items, err)
 	}
 	if items, err := client.ListVsVipInventory(context.Background(), "tenant-a"); err != nil || len(items) != 1 {
 		t.Fatalf("ListVsVipInventory = %d, %v", len(items), err)
@@ -694,6 +711,9 @@ func TestInventoryWrapperErrors(t *testing.T) {
 	if _, err := client.GetCluster(context.Background()); err == nil {
 		t.Fatalf("GetCluster succeeded with server error")
 	}
+	if _, err := client.ListSEConfig(context.Background()); err == nil {
+		t.Fatalf("ListSEConfig succeeded with server error")
+	}
 	if _, err := client.GetPoolRuntimeDetail(context.Background(), "tenant-a", "pool-1"); err == nil {
 		t.Fatalf("GetPoolRuntimeDetail succeeded with server error")
 	}
@@ -746,6 +766,15 @@ func TestMarkersAndRefUUID(t *testing.T) {
 	} {
 		if got := RefUUID(input); got != want {
 			t.Fatalf("RefUUID(%q) = %q, want %q", input, got, want)
+		}
+	}
+	for input, want := range map[string]string{
+		"":                                     "",
+		"https://controller/api/cloud/cloud-1": "",
+		"https://controller/api/cloud/cloud-1#cloud-primary": "cloud-primary",
+	} {
+		if got := RefName(input); got != want {
+			t.Fatalf("RefName(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

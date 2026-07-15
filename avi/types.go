@@ -180,9 +180,13 @@ type Tenant struct {
 // --- Cluster --------------------------------------------------------------
 
 type ClusterNode struct {
-	Name       string `json:"name"`
-	VMHostname string `json:"vm_hostname,omitempty"`
-	VMUUID     string `json:"vm_uuid,omitempty"`
+	Name           string `json:"name"`
+	IP             IPAddr `json:"ip,omitempty"`
+	IP6            IPAddr `json:"ip6,omitempty"`
+	PublicIPOrName IPAddr `json:"public_ip_or_name,omitempty"`
+	VMHostname     string `json:"vm_hostname,omitempty"`
+	VMName         string `json:"vm_name,omitempty"`
+	VMUUID         string `json:"vm_uuid,omitempty"`
 }
 
 type Cluster struct {
@@ -234,6 +238,41 @@ type HealthScore struct {
 type IPAddr struct {
 	Type string `json:"type,omitempty"`
 	Addr string `json:"addr,omitempty"`
+}
+
+// IPAddrPrefix matches an Avi address and prefix-length pair.
+type IPAddrPrefix struct {
+	IPAddr IPAddr `json:"ip_addr"`
+	Mask   *int   `json:"mask,omitempty"`
+}
+
+// VNICNetwork is one address assignment attached to an Avi vNIC.
+type VNICNetwork struct {
+	ControllerAllocated bool         `json:"ctlr_alloc,omitempty"`
+	IP                  IPAddrPrefix `json:"ip"`
+	Mode                string       `json:"mode,omitempty"`
+}
+
+// VLANInterface is a VLAN child interface and its address assignments.
+type VLANInterface struct {
+	IfName       string        `json:"if_name,omitempty"`
+	IsMgmt       bool          `json:"is_mgmt,omitempty"`
+	VLANID       int           `json:"vlan_id,omitempty"`
+	VNICNetworks []VNICNetwork `json:"vnic_networks,omitempty"`
+	VrfRef       string        `json:"vrf_ref,omitempty"`
+}
+
+// VNIC is the subset of Avi's vNIC object needed for address inventory.
+type VNIC struct {
+	IfName         string          `json:"if_name,omitempty"`
+	IsMgmt         bool            `json:"is_mgmt,omitempty"`
+	MacAddress     string          `json:"mac_address,omitempty"`
+	NetworkName    string          `json:"network_name,omitempty"`
+	NetworkRef     string          `json:"network_ref,omitempty"`
+	VLANID         int             `json:"vlan_id,omitempty"`
+	VLANInterfaces []VLANInterface `json:"vlan_interfaces,omitempty"`
+	VNICNetworks   []VNICNetwork   `json:"vnic_networks,omitempty"`
+	VrfRef         string          `json:"vrf_ref,omitempty"`
 }
 
 // --- Virtual Service Inventory --------------------------------------------
@@ -360,15 +399,21 @@ type PoolRuntimeDetail struct {
 // --- Service Engine Inventory ---------------------------------------------
 
 type SEConfig struct {
-	UUID            string   `json:"uuid"`
-	Name            string   `json:"name"`
-	URL             string   `json:"url,omitempty"`
-	EnableState     string   `json:"enable_state,omitempty"` // SE_STATE_ENABLED / SE_STATE_DISABLED / ...
-	HostRef         string   `json:"host_ref,omitempty"`
-	MgmtIPAddress   *IPAddr  `json:"mgmt_ip_address,omitempty"`
-	TenantRef       string   `json:"tenant_ref,omitempty"`
-	SeGroupRef      string   `json:"se_group_ref,omitempty"`
-	VirtualServices []string `json:"virtualservice_refs,omitempty"`
+	UUID             string   `json:"uuid"`
+	Name             string   `json:"name"`
+	URL              string   `json:"url,omitempty"`
+	AvailabilityZone string   `json:"availability_zone,omitempty"`
+	CloudRef         string   `json:"cloud_ref,omitempty"`
+	ControllerIP     string   `json:"controller_ip,omitempty"`
+	DataVNICs        []VNIC   `json:"data_vnics,omitempty"`
+	EnableState      string   `json:"enable_state,omitempty"` // SE_STATE_ENABLED / SE_STATE_DISABLED / ...
+	HostRef          string   `json:"host_ref,omitempty"`
+	MgmtIPAddress    *IPAddr  `json:"mgmt_ip_address,omitempty"`
+	MgmtIP6Address   *IPAddr  `json:"mgmt_ip6_address,omitempty"`
+	MgmtVNIC         *VNIC    `json:"mgmt_vnic,omitempty"`
+	TenantRef        string   `json:"tenant_ref,omitempty"`
+	SeGroupRef       string   `json:"se_group_ref,omitempty"`
+	VirtualServices  []string `json:"virtualservice_refs,omitempty"`
 }
 
 type SERuntime struct {

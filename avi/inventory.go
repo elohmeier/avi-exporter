@@ -106,6 +106,14 @@ func (c *Client) ListSEInventory(ctx context.Context) ([]SEInventoryItem, error)
 	return listAll[SEInventoryItem](ctx, c, "/api/serviceengine-inventory", "admin", inventoryExtra())
 }
 
+// ListSEConfig returns controller-owned Service Engine configuration including
+// management and data vNIC address assignments.
+func (c *Client) ListSEConfig(ctx context.Context) ([]SEConfig, error) {
+	q := fieldsExtra("uuid,name,cloud_ref,tenant_ref,se_group_ref,controller_ip,availability_zone,mgmt_vnic,data_vnics")
+	q.Set("include_name", "true")
+	return listAll[SEConfig](ctx, c, "/api/serviceengine", "admin", q)
+}
+
 // ListVsVipInventory returns all VsVip inventory entries for the given tenant.
 func (c *Client) ListVsVipInventory(ctx context.Context, tenant string) ([]VsVipInventoryItem, error) {
 	return listAll[VsVipInventoryItem](ctx, c, "/api/vsvip-inventory", tenant, inventoryExtra())

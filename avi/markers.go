@@ -118,3 +118,12 @@ func RefUUID(ref string) string {
 	}
 	return ref
 }
+
+// RefName extracts the optional include_name suffix from an Avi reference URL
+// like "https://controller/api/cloud/cloud-uuid#cloud-name".
+func RefName(ref string) string {
+	if i := strings.Index(ref, "#"); i >= 0 && i+1 < len(ref) {
+		return ref[i+1:]
+	}
+	return ""
+}

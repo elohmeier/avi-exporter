@@ -1057,6 +1057,12 @@ func TestTenantRefreshHonorsParallelism(t *testing.T) {
 }
 
 func testConfig(tenants, disabled []string) *config.Config {
+	// Tests written before the controller/SE identity modules use narrowly
+	// scoped HTTP fixtures. Keep those fixtures isolated unless a test opts in
+	// by passing nil and serving every default module.
+	if disabled != nil {
+		disabled = append(append([]string{}, disabled...), "cluster_inventory", "se_config")
+	}
 	return &config.Config{
 		Labels:          map[string]string{},
 		DisabledModules: disabled,

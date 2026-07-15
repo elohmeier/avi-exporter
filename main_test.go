@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const allModulesCSV = "cluster,controller_metrics,se_inventory,se_metrics,vs_inventory,vs_metrics,pool_inventory,pool_metrics,pool_members,vsvip,pool_group,gslb,topology"
+const allModulesCSV = "cluster,cluster_inventory,controller_metrics,se_config,se_inventory,se_metrics,vs_inventory,vs_metrics,pool_inventory,pool_metrics,pool_members,vsvip,pool_group,gslb,topology"
 
 type exitCalled struct {
 	code int

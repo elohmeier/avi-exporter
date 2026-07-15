@@ -20,6 +20,14 @@ func TestFullRefreshCoversAllModules(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/cluster/runtime":
 			writeFullClusterRuntime(t, w)
+		case "/api/cluster":
+			writeJSON(t, w, map[string]any{
+				"uuid": "cluster-a", "name": "avi-a",
+				"nodes": []map[string]any{{
+					"name": "node-a", "ip": map[string]any{"addr": "192.0.2.10", "type": "V4"},
+					"vm_hostname": "controller-a", "vm_name": "avi-controller-a", "vm_uuid": "vm-a",
+				}},
+			})
 		case "/api/analytics/metrics/collection":
 			writeFullAnalytics(t, w, r)
 		case "/api/analytics/prometheus-metrics/serviceengine":
@@ -30,6 +38,20 @@ func TestFullRefreshCoversAllModules(t *testing.T) {
 			writeFullPoolPrometheusMetrics(t, w)
 		case "/api/serviceengine-inventory":
 			writeFullSEInventory(t, w)
+		case "/api/serviceengine":
+			writeJSON(t, w, map[string]any{
+				"count": 1,
+				"results": []map[string]any{{
+					"uuid": "se-a", "name": "se-a", "controller_ip": "192.0.2.10",
+					"cloud_ref":    "https://controller/api/cloud/cloud-a#cloud-a",
+					"tenant_ref":   "https://controller/api/tenant/admin-uuid#admin",
+					"se_group_ref": "https://controller/api/serviceenginegroup/seg-a#seg-a",
+					"mgmt_vnic": map[string]any{
+						"if_name": "Management", "network_ref": "https://controller/api/network/net-mgmt#management",
+						"vnic_networks": []map[string]any{{"ip": map[string]any{"ip_addr": map[string]any{"addr": "192.0.2.20", "type": "V4"}, "mask": 24}}},
+					},
+				}},
+			})
 		case "/api/virtualservice-inventory":
 			writeFullVSInventory(t, w)
 		case "/api/pool-inventory":
@@ -66,6 +88,12 @@ func TestFullRefreshCoversAllModules(t *testing.T) {
 	mfs := gatherRegisteredExporter(t, exp)
 	if got := firstGaugeValue(t, metricFamily(t, mfs, "avi_cluster_up")); got != 1 {
 		t.Fatalf("avi_cluster_up = %v, want 1", got)
+	}
+	if got := countMetricsWithLabel(metricFamily(t, mfs, "avi_cluster_node_info"), "vm_uuid", "vm-a"); got != 1 {
+		t.Fatalf("cluster identity metric count = %d, want 1", got)
+	}
+	if got := countMetricsWithLabel(metricFamily(t, mfs, "avi_se_address_info"), "ip", "192.0.2.20"); got != 1 {
+		t.Fatalf("SE address metric count = %d, want 1", got)
 	}
 	if got := countMetricsWithLabel(metricFamily(t, mfs, "avi_se_oper_up"), "se_uuid", "se-a"); got != 1 {
 		t.Fatalf("SE metrics for se-a = %d, want 1", got)

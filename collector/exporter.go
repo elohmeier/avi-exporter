@@ -57,6 +57,7 @@ type Exporter struct {
 	clusterStateInfo *prometheus.GaugeVec
 	clusterNodeUp    *prometheus.GaugeVec
 	clusterNodeRole  *prometheus.GaugeVec
+	clusterNodeInfo  *prometheus.GaugeVec
 
 	// --- Controller analytics ---
 	controllerAvgCPUUsage          *prometheus.GaugeVec
@@ -155,6 +156,8 @@ type Exporter struct {
 	seMigrateState    *prometheus.GaugeVec
 	seVersionInfo     *prometheus.GaugeVec
 	seEnableStateInfo *prometheus.GaugeVec
+	seInfo            *prometheus.GaugeVec
+	seAddressInfo     *prometheus.GaugeVec
 
 	// --- SE analytics ---
 	seAvgCPUUsage     *prometheus.GaugeVec
@@ -213,6 +216,7 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 
 	// Label sets — see appendLabels() / xxxLabelValues() helpers in each file.
 	clusterLbl := append(append([]string{}, base...), "node")
+	clusterInfoLbl := append(append([]string{}, base...), "node", "controller_cluster", "controller_cluster_uuid", "ip", "ip6", "public_ip_or_name", "vm_hostname", "vm_name", "vm_uuid")
 	controllerLbl := append(append([]string{}, base...), "controller_uuid")
 	moduleLbl := append(append([]string{}, base...), "module", "tenant")
 	tenantBase := append(append([]string{}, base...), "tenant")
@@ -221,6 +225,8 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 	poolLbl := append(append([]string{}, tenantBase...), "pool", "pool_uuid", "namespace", "service", "ingress", "host", "ako")
 	poolMemberLbl := append(append([]string{}, tenantBase...), "pool", "pool_uuid", "ip", "port", "namespace", "service", "ingress", "host", "ako")
 	seLbl := append(append([]string{}, base...), "se", "se_uuid")
+	seInfoLbl := append(append([]string{}, seLbl...), "cloud", "cloud_uuid", "se_group", "se_group_uuid", "tenant", "tenant_uuid", "controller_ip", "availability_zone")
+	seAddressLbl := append(append([]string{}, seLbl...), "ip", "address_role", "interface", "network", "network_uuid", "vrf", "vrf_uuid", "cidr", "mac")
 	seAnalyticsLbl := append(append([]string{}, tenantBase...), "se", "se_uuid")
 	pgLbl := append(append([]string{}, tenantBase...), "poolgroup", "poolgroup_uuid", "namespace", "service", "ingress", "host", "ako")
 	gslbLbl := append(append([]string{}, tenantBase...), "gslbservice", "gslbservice_uuid")
@@ -275,6 +281,7 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		clusterStateInfo: g("cluster_state_info", "Cluster state label-carrying info metric (always 1)", withTrailing(base, "state")),
 		clusterNodeUp:    g("cluster_node_up", "1 if the named controller node is up", clusterLbl),
 		clusterNodeRole:  g("cluster_node_leader", "1 if the named node is the cluster leader", clusterLbl),
+		clusterNodeInfo:  g("cluster_node_info", "Controller cluster node inventory (always 1)", clusterInfoLbl),
 
 		// Controller analytics
 		controllerAvgCPUUsage:          g("controller_avg_cpu_usage", "Controller average CPU usage percent", controllerLbl),
@@ -371,6 +378,8 @@ func NewExporter(cfg *config.Config, url, username, password string, ignoreCert 
 		seMigrateState:    g("se_migrate_state_info", "SE migrate_state info (always 1)", withTrailing(seLbl, "migrate_state")),
 		seVersionInfo:     g("se_version_info", "SE software version info (always 1)", withTrailing(seLbl, "version")),
 		seEnableStateInfo: g("se_enable_state_info", "SE enable_state info (always 1)", withTrailing(seLbl, "enable_state")),
+		seInfo:            g("se_info", "Service Engine configuration inventory (always 1)", seInfoLbl),
+		seAddressInfo:     g("se_address_info", "Service Engine interface address inventory (always 1)", seAddressLbl),
 
 		// SE analytics
 		seAvgCPUUsage:     g("se_avg_cpu_usage", "SE average CPU usage percent", seAnalyticsLbl),
@@ -484,7 +493,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // Reset loops so adding a new metric doesn't require updating three lists.
 func (e *Exporter) allGaugeVecs() []*prometheus.GaugeVec {
 	out := []*prometheus.GaugeVec{
-		e.clusterStateInfo, e.clusterNodeUp, e.clusterNodeRole,
+		e.clusterStateInfo, e.clusterNodeUp, e.clusterNodeRole, e.clusterNodeInfo,
 		e.controllerAvgCPUUsage, e.controllerAvgMemUsage, e.controllerAvgDiskUsage,
 		e.controllerAvgDiskReadBytes, e.controllerAvgDiskWriteBytes,
 		e.controllerAvgNumActiveVS, e.controllerAvgNumBackendServers,
@@ -500,6 +509,7 @@ func (e *Exporter) allGaugeVecs() []*prometheus.GaugeVec {
 		e.seOperUp, e.seOperStatusInfo, e.seEnabled, e.seHealthScore,
 		e.seConnected, e.seBgpPeersUp, e.seGatewayUp, e.seAtCurrVer, e.seSufficientMem, e.seLicensedCores,
 		e.seLicenseState, e.sePowerState, e.seMigrateState, e.seVersionInfo, e.seEnableStateInfo,
+		e.seInfo, e.seAddressInfo,
 		e.vipOperUp, e.vipOperStatusInfo, e.vipEnabled, e.vipPercentSesUp, e.vipNumSeAssigned, e.vipNumSeRequested,
 		e.vipActiveOnSe, e.vipSharedByVsCount, e.vipFloatingIP, e.vipAutoAllocated, e.vipDNSRecord,
 		e.topologyNode, e.topologyEdge, e.topologyNodeState, e.topologyNodeHealth,

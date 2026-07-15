@@ -121,6 +121,7 @@ tooling current, grouped by ecosystem.
 | Module | Description |
 | --- | --- |
 | `cluster` | Controller cluster + per-node up/leader status |
+| `cluster_inventory` | Controller-node identity and addressing from `/api/cluster`, including cluster UUID, IPv4/IPv6, public name/address, VM hostname/name, and VM UUID. |
 | `controller_metrics` | Controller CPU, memory, disk, active virtual services, and backend server analytics |
 | `vs_inventory` | Per-VS oper_status, enabled, health_score, percent_ses_up |
 | `vs_metrics` | Per-VS DNS, L4 client/server, L7 client/server, SSL, WAF, response-code, latency, and health-score analytics |
@@ -129,6 +130,7 @@ tooling current, grouped by ecosystem.
 | `pool_metrics` | Per-pool L4/L7 server, Apdex, packet/byte, connection, response-code, latency, and health-score analytics |
 | `pool_members` | Per-server oper_status. Costs one extra API call per pool (`/api/pool/<uuid>/runtime/server/detail/`). |
 | `pool_group` | Pool group inventory + topology edges (vs → pool_group → pools). Catches SNI/HTTP-policy fan-out invisible to plain VS→pool edges. |
+| `se_config` | Service Engine identity plus all management/data vNIC addresses from `/api/serviceengine`, including cloud, SE group, tenant, interface, network, VRF, CIDR, and MAC metadata. Independent of `se_inventory`. |
 | `se_inventory` | Per-SE oper_status, enabled, health_score, plus se_connected/bgp_peers_up/gateway_up/license_state/power_state/migrate_state/version. |
 | `se_metrics` | Per-SE interface, CPU/mem/disk, connection, packet-buffer, persistence, SYN-cache, SSL-session-cache, bandwidth, and health-score analytics. |
 | `vsvip` | Per-VsVip oper_status, percent_ses_up, SE placement, floating-IP, auto-allocation, DNS records, plus a `vip_shared_by_vs_count` that exposes shared-listener / SNI patterns. |
@@ -136,6 +138,33 @@ tooling current, grouped by ecosystem.
 | `topology` | Node + edge metrics for Grafana node-graph visualization (`vsvip → vs → (pool \| poolgroup → pool) → poolmember`). |
 
 Disable with `-disabled-modules vs_metrics,se_metrics`.
+
+### Controller and Service Engine identity metrics
+
+The identity modules expose label-carrying gauges whose value is always `1`:
+
+| Metric | Key labels |
+| --- | --- |
+| `avi_cluster_node_info` | `node`, `controller_cluster`, `controller_cluster_uuid`, `ip`, `ip6`, `public_ip_or_name`, `vm_hostname`, `vm_name`, `vm_uuid` |
+| `avi_se_info` | `se`, `se_uuid`, `cloud`, `cloud_uuid`, `se_group`, `se_group_uuid`, `tenant`, `tenant_uuid`, `controller_ip`, `availability_zone` |
+| `avi_se_address_info` | `se`, `se_uuid`, `ip`, `address_role`, `interface`, `network`, `network_uuid`, `vrf`, `vrf_uuid`, `cidr`, `mac` |
+
+`address_role` is `management` or `data`. Duplicate addresses reported in
+multiple Avi fields are collapsed to one series, preferring the management
+role and the richest available interface metadata. Invalid addresses are
+ignored, while valid CIDRs are normalized to their network prefix.
+
+For example, these queries resolve an observed address and list the current
+controller inventory:
+
+```promql
+avi_se_address_info{ip="10.20.30.40"}
+avi_cluster_node_info
+```
+
+Both modules participate in readiness by default and retain their last good
+metric set if a refresh fails. Disable either module explicitly when the Avi
+API role cannot read its configuration endpoint.
 
 ### Exporter self-metrics (always emitted)
 
