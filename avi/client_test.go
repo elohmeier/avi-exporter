@@ -530,8 +530,11 @@ func TestInventoryWrappers(t *testing.T) {
 			if got := r.Header.Get("X-Avi-Tenant"); got != "tenant-a" {
 				t.Fatalf("VS config tenant = %q", got)
 			}
-			if got := r.URL.Query().Get("fields"); !strings.Contains(got, "service_metadata") {
-				t.Fatalf("VS config fields = %q", got)
+			fields := r.URL.Query().Get("fields")
+			for _, field := range []string{"service_metadata", "vsvip_ref", "pool_ref", "pool_group_ref"} {
+				if !strings.Contains(fields, field) {
+					t.Fatalf("VS config fields %q omit %q", fields, field)
+				}
 			}
 			_, _ = w.Write([]byte(`{"results":[{"uuid":"vs-1","name":"vs-1","service_metadata":"{\"namespace\":\"team-a\",\"hostnames\":[\"app.example.com\"]}"}]}`))
 		case "/api/pool-inventory":

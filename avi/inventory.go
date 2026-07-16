@@ -82,11 +82,11 @@ func (c *Client) ListVSInventory(ctx context.Context, tenant string) ([]VSInvent
 	return listAll[VSInventoryItem](ctx, c, "/api/virtualservice-inventory", tenant, inventoryExtra())
 }
 
-// ListVSConfig returns the VS config fields needed to restore AKO metadata
-// that the inventory endpoint omits on some controller versions.
+// ListVSConfig returns the VS config fields needed to restore AKO metadata and
+// topology references that the inventory endpoint omits on some versions.
 func (c *Client) ListVSConfig(ctx context.Context, tenant string) ([]VSConfig, error) {
 	return listAll[VSConfig](ctx, c, "/api/virtualservice", tenant,
-		fieldsExtra("uuid,name,created_by,markers,service_metadata,type,vh_parent_vs_ref,vip,services"))
+		fieldsExtra("uuid,name,created_by,markers,service_metadata,type,vh_parent_vs_ref,vsvip_ref,pool_ref,pool_group_ref,vip,services"))
 }
 
 // ListPoolInventory returns all pool inventory entries for the given tenant.

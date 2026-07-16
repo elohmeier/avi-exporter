@@ -6,6 +6,30 @@ import (
 	"github.com/elohmeier/avi-exporter/avi"
 )
 
+func TestMergeVSConfigMetadataRestoresDeliveryRefs(t *testing.T) {
+	dst := avi.VSConfig{
+		UUID:    "vs-a",
+		PoolRef: "pool-from-inventory",
+	}
+	src := avi.VSConfig{
+		VsvipRef:     "vsvip-from-config",
+		PoolRef:      "pool-from-config",
+		PoolGroupRef: "poolgroup-from-config",
+	}
+
+	mergeVSConfigMetadata(&dst, src)
+
+	if dst.VsvipRef != src.VsvipRef {
+		t.Fatalf("VsvipRef = %q, want %q", dst.VsvipRef, src.VsvipRef)
+	}
+	if dst.PoolRef != "pool-from-inventory" {
+		t.Fatalf("PoolRef = %q, want existing inventory value", dst.PoolRef)
+	}
+	if dst.PoolGroupRef != src.PoolGroupRef {
+		t.Fatalf("PoolGroupRef = %q, want %q", dst.PoolGroupRef, src.PoolGroupRef)
+	}
+}
+
 func TestEnrichVsVipInventoryUsesLinkedChildVSMetadata(t *testing.T) {
 	items := []avi.VsVipInventoryItem{{
 		Config: avi.VsVipConfig{UUID: "vsvip-a", Name: "vip-a"},

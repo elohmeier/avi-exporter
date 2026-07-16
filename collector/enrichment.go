@@ -47,6 +47,12 @@ func mergeVSConfigMetadata(dst *avi.VSConfig, src avi.VSConfig) {
 	if dst.VsvipRef == "" {
 		dst.VsvipRef = src.VsvipRef
 	}
+	if dst.PoolRef == "" {
+		dst.PoolRef = src.PoolRef
+	}
+	if dst.PoolGroupRef == "" {
+		dst.PoolGroupRef = src.PoolGroupRef
+	}
 	if len(src.Markers) > 0 {
 		dst.Markers = src.Markers
 	}

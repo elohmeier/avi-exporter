@@ -20,10 +20,31 @@ import (
 // (collector/pool.go) because they require an extra per-pool API call.
 // Pool group nodes/edges are emitted by the pool_group module.
 func (e *Exporter) collectTopology(tenant string, vsItems []avi.VSInventoryItem, poolItems []avi.PoolInventoryItem, vsvipItems []avi.VsVipInventoryItem, ch chan<- prometheus.Metric) {
-	// Map pool UUID → pool item for fast lookup when we walk VS→pool edges.
-	poolByUUID := make(map[string]avi.PoolInventoryItem, len(poolItems))
-	for _, p := range poolItems {
-		poolByUUID[p.Config.UUID] = p
+	// Pool inventory carries authoritative reverse VS references, including
+	// policy-selected pools whose VS config has no direct pool_ref. Keep the VS
+	// chain available while walking those references and deduplicate repeated
+	// discoveries of the same edge.
+	vsChainByUUID := make(map[string]string, len(vsItems))
+	vsNeedsReversePoolEdges := make(map[string]bool, len(vsItems))
+	for _, vs := range vsItems {
+		mi := avi.ParseObjectMetadata(vs.Config.Markers, vs.Config.ServiceMetadata)
+		vsChainByUUID[vs.Config.UUID] = chainFor(mi, vs.Config.Name)
+		vsNeedsReversePoolEdges[vs.Config.UUID] = avi.RefUUID(vs.Config.PoolRef) == "" && avi.RefUUID(vs.Config.PoolGroupRef) == ""
+	}
+	emittedVSPoolEdges := make(map[string]struct{})
+	emitVSPoolEdge := func(vsUUID, poolUUID, chain string) {
+		if vsUUID == "" || poolUUID == "" {
+			return
+		}
+		source := "vs:" + vsUUID
+		target := "pool:" + poolUUID
+		edgeID := source + "->" + target
+		if _, exists := emittedVSPoolEdges[edgeID]; exists {
+			return
+		}
+		emittedVSPoolEdges[edgeID] = struct{}{}
+		edgeLabels := e.appendLabels(tenant, edgeID, source, target, chain, "")
+		e.topologyEdge.WithLabelValues(edgeLabels...).Set(1)
 	}
 
 	// VsVip nodes + vsvip→vs edges.
@@ -105,10 +126,7 @@ func (e *Exporter) collectTopology(tenant string, vsItems []avi.VSInventoryItem,
 
 		// VS → pool edge (direct).
 		if poolUUID := avi.RefUUID(vs.Config.PoolRef); poolUUID != "" {
-			poolNodeID := "pool:" + poolUUID
-			edgeID := nodeID + "->" + poolNodeID
-			edgeLabels := e.appendLabels(tenant, edgeID, nodeID, poolNodeID, chain, "")
-			e.topologyEdge.WithLabelValues(edgeLabels...).Set(1)
+			emitVSPoolEdge(vs.Config.UUID, poolUUID, chain)
 		}
 		// VS → pool_group edge (the fan-out hole — pool group then contains N pools).
 		if pgUUID := avi.RefUUID(vs.Config.PoolGroupRef); pgUUID != "" {
@@ -137,13 +155,30 @@ func (e *Exporter) collectTopology(tenant string, vsItems []avi.VSInventoryItem,
 		statsLabels := e.appendLabels(tenant, nodeID, "pool", chain)
 		e.topologyNodeState.WithLabelValues(statsLabels...).Set(value)
 		e.topologyNodeHealth.WithLabelValues(statsLabels...).Set(health)
+
+		// Pool inventory exposes reverse VS references for both direct and
+		// policy-selected delivery paths. The latter cannot be reconstructed
+		// from VS inventory alone because it omits l4_policies and the exporter
+		// account may not be allowed to read L4 Policy Set configuration.
+		for _, vsRef := range p.VirtualServices {
+			vsUUID := vsRef.UUID
+			if vsUUID == "" {
+				vsUUID = avi.RefUUID(vsRef.Ref)
+			}
+			vsChain, exists := vsChainByUUID[vsUUID]
+			if !exists {
+				continue
+			}
+			if !vsNeedsReversePoolEdges[vsUUID] {
+				continue
+			}
+			emitVSPoolEdge(vsUUID, p.Config.UUID, vsChain)
+		}
 		// Pool member topology nodes/edges are emitted by the pool_members module
 		// (collector/pool.go:collectPoolMembers), which sources per-server runtime
 		// from /api/pool/<uuid>/runtime/server/detail/ — the bulk pool-inventory
 		// endpoint doesn't include per-server state.
 	}
-
-	_ = poolByUUID // reserved for future cross-checks
 }
 
 // chainFor returns a stable identifier grouping related nodes for dashboards.
